@@ -83,3 +83,38 @@ body {
   background-color: #9333ea;
   color: #f2effa;
 }
+/* Royal Bite Kitchen — design system base */
+body {
+  background-color: #0d0620;
+  color: #f1e9dd;
+  font-family: "Liter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background-color: #9333ea;
+  color: #f1e9dd;
+}
+
+/* Thin themed scrollbar */
+.royal-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.royal-scroll::-webkit-scrollbar-thumb {
+  background: #3b2560;
+}
+.royal-scroll::-webkit-scrollbar-thumb:hover {
+  background: #9333ea;
+}
+.royal-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Visible focus for keyboard / accessibility */
+:focus-visible {
+  outline: 2px solid #9333ea;
+  outline-offset: 2px;
+}

@@ -4,7 +4,23 @@ module.exports = {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
+      fontFamily: {
+        display: ["Oranienbaum", "Georgia", "serif"],
+        sans: ["Liter", "ui-sans-serif", "system-ui", "sans-serif"],
+      },
       colors: {
+        royal: {
+          bg: "#0D0620",
+          bgsoft: "#150A26",
+          surface: "#1E0F35",
+          faint: "#2A1747",
+          line: "#3B2560",
+          primary: "#9333EA",
+          accent: "#C084FC",
+          cream: "#F1E9DD",
+          dim: "#B3A897",
+          silver: "#D9DCE6",
+        },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
