@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, Plus, Trash2, X } from "lucide-react";
-import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/lib/auth";
 import { formatNaira, nairaToKobo } from "@contracts/money";
 import { PAYMENT_METHOD_LABEL, type PaymentMethod } from "@contracts/payments";
@@ -22,6 +21,16 @@ export interface CompletedSaleResult {
   totalKobo: number;
   payments: Array<{ method: PaymentMethod; amountKobo: number; reference: string | null }>;
   changeKobo: number;
+  /** True for a sale saved locally while offline (pending sync). */
+  offline?: boolean;
+}
+
+/** What the checkout modal hands to its parent on "Complete sale". */
+export interface CheckoutSubmitInput {
+  items: Array<{ itemId: number; quantity: number; optionIds: number[] }>;
+  discount: { type: "percent" | "fixed"; value: number } | null;
+  payments: Array<{ method: PaymentMethod; amount: number; reference?: string }>;
+  saleDate?: string;
 }
 
 interface PaymentRow {
@@ -38,13 +47,18 @@ export function CheckoutModal({
   totalKobo,
   lines,
   discount,
+  onSubmit,
   onCancel,
   onCompleted,
   onProgress,
+  offlineMode = false,
 }: {
   totalKobo: number;
   lines: Array<{ itemId: number; quantity: number; optionIds: number[] }>;
   discount: { type: "percent" | "fixed"; value: number } | null;
+  /** Parent-owned submit: saves online or queues offline. Must throw with a
+   *  user-readable message on failure. */
+  onSubmit: (input: CheckoutSubmitInput) => Promise<CompletedSaleResult>;
   onCancel: () => void;
   onCompleted: (sale: CompletedSaleResult) => void;
   /** live payment progress for the customer display */
@@ -52,6 +66,8 @@ export function CheckoutModal({
     paidKobo: number;
     payments: Array<{ label: string; amountKobo: number }>;
   }) => void;
+  /** Offline sales may carry a manual date for any role (within 72h). */
+  offlineMode?: boolean;
 }) {
   const { user } = useAuth();
   const [rows, setRows] = useState<PaymentRow[]>([
@@ -59,9 +75,9 @@ export function CheckoutModal({
   ]);
   const [saleDate, setSaleDate] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const complete = trpc.sales.completeSale.useMutation();
-  const canBackdate = user ? roleAtLeast(user.role, "manager") : false;
+  const canBackdate = offlineMode || (user ? roleAtLeast(user.role, "manager") : false);
 
   const paidKobo = useMemo(
     () =>
@@ -105,7 +121,7 @@ export function CheckoutModal({
     ]);
   }
 
-  function submit() {
+  async function submit() {
     setError(null);
     const payments = rows
       .map((r) => ({
@@ -115,8 +131,9 @@ export function CheckoutModal({
       }))
       .filter((p) => Number.isFinite(p.amount) && p.amount > 0);
 
-    complete.mutate(
-      {
+    setSubmitting(true);
+    try {
+      const sale = await onSubmit({
         items: lines.map((l) => ({
           itemId: l.itemId,
           quantity: l.quantity,
@@ -125,12 +142,13 @@ export function CheckoutModal({
         discount: discount && discount.value > 0 ? discount : null,
         payments,
         saleDate: saleDate ? new Date(saleDate).toISOString() : undefined,
-      },
-      {
-        onSuccess: (sale) => onCompleted(sale as CompletedSaleResult),
-        onError: (err) => setError(err.message),
-      },
-    );
+      });
+      onCompleted(sale);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save the sale.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -258,11 +276,13 @@ export function CheckoutModal({
             )}
           </div>
 
-          {/* Manual sale date — manager+ */}
+          {/* Manual sale date — manager+ (or anyone while offline) */}
           {canBackdate && (
             <label className="mt-5 block">
               <span className="text-[9px] uppercase tracking-[0.2em] text-royal-dim/70">
-                Sale date (optional — manager override)
+                {offlineMode
+                  ? "Sale date (optional — offline sales only, up to 72h back)"
+                  : "Sale date (optional — manager override)"}
               </span>
               <input
                 type="datetime-local"
@@ -281,12 +301,12 @@ export function CheckoutModal({
 
           <button
             type="button"
-            disabled={complete.isPending || remainingKobo > 0}
-            onClick={submit}
+            disabled={submitting || remainingKobo > 0}
+            onClick={() => void submit()}
             className="mt-6 flex w-full items-center justify-center gap-2 rounded-full border border-royal-accent py-3.5 text-sm font-semibold uppercase tracking-[0.2em] text-royal-accent transition-colors hover:bg-royal-accent hover:text-royal-bg disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {complete.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-            {complete.isPending
+            {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+            {submitting
               ? "Saving sale…"
               : remainingKobo > 0
                 ? `${formatNaira(remainingKobo)} still due`

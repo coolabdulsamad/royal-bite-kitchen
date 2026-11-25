@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { createRouter } from "../middleware";
 import { authedProcedure } from "../auth/guards";
 import { getDb } from "../queries/connection";
@@ -12,6 +12,7 @@ import {
   saleItems,
   salePayments,
   sales,
+  users,
 } from "@db/schema";
 import { nairaToKobo } from "@contracts/money";
 import { DISCOUNT_LIMIT_PERCENT } from "@contracts/payments";
@@ -23,6 +24,11 @@ interface ModifierSnapshot {
   option: string;
   priceDeltaKobo: number;
 }
+
+/** Offline sales may be backdated this far without a manager role. */
+const OFFLINE_BACKDATE_LIMIT_MS = 72 * 60 * 60 * 1000;
+/** Clock-skew tolerance for device timestamps. */
+const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 export const salesRouter = createRouter({
   completeSale: authedProcedure
@@ -56,13 +62,71 @@ export const salesRouter = createRouter({
           )
           .max(6)
           .default([]),
-        /** ISO datetime — manager+ only, cannot be in the future. */
+        /** ISO datetime — manager+ only, cannot be in the future. Offline
+         *  sales (with clientRef) may be backdated up to 72h by any role. */
         saleDate: z.string().datetime().optional(),
+        /** Idempotency key from the selling device — retries with the same
+         *  ref return the already-saved sale instead of duplicating it. */
+        clientRef: z.string().trim().min(8).max(64).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const db = getDb();
       const staffRole = ctx.staff.role as StaffRole;
+
+      // ------------------------------------------- idempotent replay (offline sync)
+      const replayExisting = async () => {
+        if (!input.clientRef) return null;
+        const [existing] = await db
+          .select()
+          .from(sales)
+          .where(eq(sales.clientRef, input.clientRef))
+          .limit(1);
+        if (!existing) return null;
+        const [cashier] = await db
+          .select({ name: users.name })
+          .from(users)
+          .where(eq(users.id, existing.staffId))
+          .limit(1);
+        const dbLines = await db
+          .select()
+          .from(saleItems)
+          .where(eq(saleItems.saleId, existing.id));
+        const dbPayments = await db
+          .select()
+          .from(salePayments)
+          .where(eq(salePayments.saleId, existing.id));
+        const paidKobo = dbPayments.reduce((s, p) => s + p.amountKobo, 0);
+        return {
+          ok: true as const,
+          saleId: existing.id,
+          receiptNo: existing.receiptNo,
+          cashierName: cashier?.name ?? "Staff",
+          soldAt: existing.soldAt.toISOString(),
+          lines: dbLines.map((l) => ({
+            itemId: l.itemId,
+            itemName: l.itemName,
+            unitPriceKobo: l.unitPriceKobo,
+            quantity: l.quantity,
+            modifiers: l.modifiersJson
+              ? (JSON.parse(l.modifiersJson) as ModifierSnapshot[])
+              : [],
+            lineTotalKobo: l.lineTotalKobo,
+          })),
+          subtotalKobo: existing.subtotalKobo,
+          discountKobo: existing.discountKobo,
+          totalKobo: existing.totalKobo,
+          payments: dbPayments.map((p) => ({
+            method: p.method,
+            amountKobo: p.amountKobo,
+            reference: p.reference,
+          })),
+          changeKobo: Math.max(0, paidKobo - existing.totalKobo),
+        };
+      };
+
+      const replayed = await replayExisting();
+      if (replayed) return replayed;
 
       // ---------------------------------------------------------- load menu
       const itemIds = input.items.map((i) => i.itemId);
@@ -237,14 +301,31 @@ export const salesRouter = createRouter({
       // --------------------------------------------------------- sale date
       let soldAt = new Date();
       if (input.saleDate) {
-        if (ROLE_LEVEL[staffRole] < ROLE_LEVEL.manager) {
+        const parsed = new Date(input.saleDate);
+        if (Number.isNaN(parsed.getTime())) {
           throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "Only a manager or above can backdate a sale",
+            code: "BAD_REQUEST",
+            message: "Invalid sale date",
           });
         }
-        const parsed = new Date(input.saleDate);
-        if (Number.isNaN(parsed.getTime()) || parsed.getTime() > Date.now()) {
+        const isManager = ROLE_LEVEL[staffRole] >= ROLE_LEVEL.manager;
+        if (!isManager) {
+          // Non-managers may only date an OFFLINE sale (clientRef present),
+          // within the last 72 hours — never the future.
+          if (!input.clientRef) {
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message: "Only a manager or above can backdate a sale",
+            });
+          }
+          if (parsed.getTime() < Date.now() - OFFLINE_BACKDATE_LIMIT_MS) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Offline sales can only be dated up to 72 hours back",
+            });
+          }
+        }
+        if (parsed.getTime() > Date.now() + FUTURE_SKEW_MS) {
           throw new TRPCError({
             code: "BAD_REQUEST",
             message: "Sale date cannot be in the future",
@@ -265,6 +346,7 @@ export const salesRouter = createRouter({
               discountKobo,
               totalKobo,
               soldAt,
+              clientRef: input.clientRef ?? null,
             })
             .$returningId();
           const receiptNo = `RB-${String(saleRow.id).padStart(6, "0")}`;
@@ -314,6 +396,10 @@ export const salesRouter = createRouter({
           changeKobo,
         };
       } catch (err) {
+        // A duplicate client_ref means a concurrent sync already saved it —
+        // return that sale instead of an error.
+        const replayedAfterRace = await replayExisting().catch(() => null);
+        if (replayedAfterRace) return replayedAfterRace;
         // Unique receipt race or DB failure — surface as a retryable error.
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",

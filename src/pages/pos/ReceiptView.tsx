@@ -33,6 +33,11 @@ export function ReceiptPaper({ sale }: { sale: CompletedSaleResult }) {
         <p className="mt-1 text-[11px] font-semibold">
           Receipt {sale.receiptNo}
         </p>
+        {sale.offline && (
+          <p className="mt-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-600">
+            Offline sale — syncs automatically
+          </p>
+        )}
         <p className="text-[10px] text-neutral-500">
           Served by {sale.cashierName}
         </p>
@@ -147,6 +152,11 @@ export function ReceiptView({
             <p className="mt-0.5 text-sm text-royal-cream">
               {sale.receiptNo} · {formatNaira(sale.totalKobo)}
             </p>
+            {sale.offline && (
+              <p className="mt-1 text-[10px] uppercase tracking-[0.15em] text-amber-400">
+                Saved offline — will sync when you're back online
+              </p>
+            )}
           </div>
           <button
             type="button"

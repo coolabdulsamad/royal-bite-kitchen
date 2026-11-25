@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Minus, MonitorPlay, Plus, Search, ShoppingCart, Trash2, X } from "lucide-react";
-import { trpc } from "@/providers/trpc";
+import { CloudOff, Minus, MonitorPlay, Plus, Search, ShoppingCart, Trash2, X } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { printerManager, usePrinter } from "@/lib/printing/printer";
 import { createDisplayPublisher } from "@/lib/customerDisplay";
+import {
+  buildOfflineSaleResult,
+  isOnline,
+  outboxStore,
+  useFullMenuWithCache,
+  useOnlineStatus,
+  type OfflineSalePayload,
+} from "@/lib/offline";
+import { api } from "@/lib/offline/api";
 import { PAYMENT_METHOD_LABEL } from "@contracts/payments";
-import { formatNaira } from "@contracts/money";
+import { formatNaira, nairaToKobo } from "@contracts/money";
 import { DISCOUNT_LIMIT_PERCENT } from "@contracts/payments";
 import {
   cartSubtotalKobo,
@@ -19,13 +27,18 @@ import {
 } from "@/lib/cart";
 import type { MenuItemWithGroups } from "@/lib/menuTypes";
 import { ModifierPicker } from "./pos/ModifierPicker";
-import { CheckoutModal, type CompletedSaleResult } from "./pos/PaymentModal";
+import {
+  CheckoutModal,
+  type CheckoutSubmitInput,
+  type CompletedSaleResult,
+} from "./pos/PaymentModal";
 import { ReceiptView } from "./pos/ReceiptView";
 
 export default function PosPage() {
   const { user } = useAuth();
   const { settings: printerSettings } = usePrinter();
-  const menuQuery = trpc.menu.fullMenu.useQuery();
+  const menu = useFullMenuWithCache();
+  const online = useOnlineStatus();
 
   const [activeCategory, setActiveCategory] = useState<number | null>(null);
   const [search, setSearch] = useState("");
@@ -98,7 +111,7 @@ export default function PosPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkoutOpen, paymentProgress, totalKobo]);
 
-  const categories = menuQuery.data ?? [];
+  const categories = menu.data ?? [];
   const visibleCategories = useMemo(() => {
     const term = search.trim().toLowerCase();
     return categories
@@ -168,6 +181,62 @@ export default function PosPage() {
     setCheckoutOpen(false);
     setMobileCartOpen(false);
     setPaymentProgress(null);
+  }
+
+  /**
+   * Online: post to the server. Offline (or if the network drops mid-save):
+   * queue in the outbox with an idempotency key and build a local receipt.
+   */
+  async function submitSale(input: CheckoutSubmitInput): Promise<CompletedSaleResult> {
+    const clientRef = crypto.randomUUID();
+    const payload: OfflineSalePayload = {
+      items: input.items,
+      discount: input.discount,
+      payments: input.payments,
+      saleDate: input.saleDate,
+      clientRef,
+    };
+
+    if (isOnline()) {
+      try {
+        const sale = await api.sales.completeSale.mutate(payload);
+        return sale as CompletedSaleResult;
+      } catch (err) {
+        // Business-rule errors (validation, permissions) must surface, not queue.
+        const message = err instanceof Error ? err.message : "";
+        const networkish = /fetch|network|timeout|abort|unreachable/i.test(message);
+        if (!networkish) throw err;
+        // fall through to offline queue
+      }
+    }
+
+    const localReceiptNo = await outboxStore.enqueue(payload, totalKobo);
+    const paymentsKobo = input.payments.map((p) => ({
+      method: p.method,
+      amountKobo: nairaToKobo(p.amount),
+      reference: p.reference ?? null,
+    }));
+    const paidKobo = paymentsKobo.reduce((s, p) => s + p.amountKobo, 0);
+    return buildOfflineSaleResult({
+      localReceiptNo,
+      cashierName: user?.name ?? "Staff",
+      lines: cart.map((l) => ({
+        itemName: l.name,
+        quantity: l.quantity,
+        modifiers: l.modifiers.map((m) => ({
+          group: m.group,
+          option: m.option,
+          priceDeltaKobo: m.priceDeltaKobo,
+        })),
+        lineTotalKobo: lineTotalKobo(l),
+      })),
+      subtotalKobo,
+      discountKobo,
+      totalKobo,
+      payments: paymentsKobo,
+      changeKobo: Math.max(0, paidKobo - totalKobo),
+      soldAt: input.saleDate ?? new Date().toISOString(),
+    });
   }
 
   function handleCompleted(sale: CompletedSaleResult) {
@@ -259,17 +328,21 @@ export default function PosPage() {
 
         {/* Items grid */}
         <div className="royal-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
-          {menuQuery.isLoading && (
+          {menu.loading && (
             <p className="py-16 text-center text-sm text-royal-dim">
               Loading the menu…
             </p>
           )}
-          {menuQuery.isError && (
-            <p className="py-16 text-center text-sm text-rose-400">
-              Could not load the menu. Check your connection and refresh.
+          {menu.error && (
+            <p className="py-16 text-center text-sm text-rose-400">{menu.error}</p>
+          )}
+          {menu.data && menu.fromCache && (
+            <p className="mb-4 flex items-center gap-2 border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs text-amber-300">
+              <CloudOff className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+              Offline — showing the menu saved on this device. Sales will sync when you're back online.
             </p>
           )}
-          {menuQuery.data &&
+          {menu.data &&
             (visibleCategories.length === 0 ? (
               <p className="py-16 text-center text-sm text-royal-dim">
                 Nothing matches — try another search.
@@ -375,9 +448,11 @@ export default function PosPage() {
             optionIds: l.modifiers.map((m) => m.optionId),
           }))}
           discount={discount}
+          onSubmit={submitSale}
           onCancel={() => setCheckoutOpen(false)}
           onCompleted={handleCompleted}
           onProgress={setPaymentProgress}
+          offlineMode={!online}
         />
       )}
 

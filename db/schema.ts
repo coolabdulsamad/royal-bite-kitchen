@@ -158,6 +158,12 @@ export const sales = mysqlTable("sales", {
   status: mysqlEnum("status", ["completed", "held", "returned"])
     .notNull()
     .default("completed"),
+  /**
+   * Idempotency key from the selling device (offline outbox). A retried sync
+   * carries the same ref, so the server returns the existing sale instead of
+   * recording a duplicate.
+   */
+  clientRef: varchar("client_ref", { length: 64 }).unique(),
   /** Business date of the sale — usually now, but manager+ can backdate. */
   soldAt: timestamp("sold_at").notNull().defaultNow(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
