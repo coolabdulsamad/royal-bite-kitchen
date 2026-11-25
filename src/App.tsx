@@ -6,6 +6,7 @@ import StaffPage from "@/pages/Staff";
 import AccountPage from "@/pages/Account";
 import MenuPage from "@/pages/Menu";
 import PosPage from "@/pages/Pos";
+import DisplayPage from "@/pages/Display";
 import {
   OrdersPage,
   SalesPage,
@@ -19,6 +20,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/display" element={<DisplayPage />} />
       <Route
         element={
           <RequireAuth>

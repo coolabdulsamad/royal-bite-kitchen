@@ -1,8 +1,10 @@
-import { useMemo, useState } from "react";
-import { Minus, Plus, Search, ShoppingCart, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Minus, MonitorPlay, Plus, Search, ShoppingCart, Trash2, X } from "lucide-react";
 import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/lib/auth";
 import { printerManager, usePrinter } from "@/lib/printing/printer";
+import { createDisplayPublisher } from "@/lib/customerDisplay";
+import { PAYMENT_METHOD_LABEL } from "@contracts/payments";
 import { formatNaira } from "@contracts/money";
 import { DISCOUNT_LIMIT_PERCENT } from "@contracts/payments";
 import {
@@ -33,6 +35,23 @@ export default function PosPage() {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [receipt, setReceipt] = useState<CompletedSaleResult | null>(null);
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
+  const [paymentProgress, setPaymentProgress] = useState<{
+    paidKobo: number;
+    payments: Array<{ label: string; amountKobo: number }>;
+  } | null>(null);
+
+  // ── Customer display publisher ──
+  const displayRef = useRef<ReturnType<typeof createDisplayPublisher> | null>(null);
+  function display() {
+    if (!displayRef.current) displayRef.current = createDisplayPublisher();
+    return displayRef.current;
+  }
+  useEffect(() => {
+    return () => {
+      displayRef.current?.close();
+      displayRef.current = null; // StrictMode remount creates a fresh channel
+    };
+  }, []);
 
   const subtotalKobo = useMemo(() => cartSubtotalKobo(cart), [cart]);
   const discountKobo = useMemo(
@@ -41,6 +60,43 @@ export default function PosPage() {
   );
   const totalKobo = subtotalKobo - discountKobo;
   const itemCount = cart.reduce((sum, l) => sum + l.quantity, 0);
+
+  // ── Customer display: mirror cart / payment / completion ──
+  useEffect(() => {
+    if (checkoutOpen || receipt) return; // payment & complete states take over
+    if (cart.length === 0) {
+      display().publish({ kind: "idle" });
+      return;
+    }
+    display().publish({
+      kind: "building",
+      lines: cart.map((l) => ({
+        name: l.name,
+        quantity: l.quantity,
+        modifiers: l.modifiers.map((m) =>
+          m.priceDeltaKobo > 0
+            ? `${m.option} +${formatNaira(m.priceDeltaKobo)}`
+            : m.option,
+        ),
+        lineTotalKobo: lineTotalKobo(l),
+      })),
+      subtotalKobo,
+      discountKobo,
+      totalKobo,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart, subtotalKobo, discountKobo, totalKobo, checkoutOpen, receipt]);
+
+  useEffect(() => {
+    if (!checkoutOpen) return;
+    display().publish({
+      kind: "payment",
+      totalKobo,
+      paidKobo: paymentProgress?.paidKobo ?? 0,
+      payments: paymentProgress?.payments ?? [],
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkoutOpen, paymentProgress, totalKobo]);
 
   const categories = menuQuery.data ?? [];
   const visibleCategories = useMemo(() => {
@@ -111,12 +167,25 @@ export default function PosPage() {
     setDiscount(null);
     setCheckoutOpen(false);
     setMobileCartOpen(false);
+    setPaymentProgress(null);
   }
 
   function handleCompleted(sale: CompletedSaleResult) {
     setCheckoutOpen(false);
     setMobileCartOpen(false);
     setReceipt(sale);
+    setPaymentProgress(null);
+    display().publish({
+      kind: "complete",
+      receiptNo: sale.receiptNo,
+      totalKobo: sale.totalKobo,
+      paidKobo: sale.totalKobo + sale.changeKobo,
+      changeKobo: sale.changeKobo,
+      payments: sale.payments.map((p) => ({
+        label: PAYMENT_METHOD_LABEL[p.method],
+        amountKobo: p.amountKobo,
+      })),
+    });
     if (printerSettings.autoPrint) {
       // fire-and-forget — the receipt modal offers a retry if this fails
       printerManager.printReceipt(sale).catch(() => {});
@@ -147,14 +216,27 @@ export default function PosPage() {
       <div className="flex min-h-0 flex-1 flex-col">
         {/* Category chips + search */}
         <div className="border-b border-royal-line px-4 pb-3 pt-4 sm:px-6">
-          <div className="relative mb-3">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-royal-dim" strokeWidth={1.75} />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search the menu…"
-              className="w-full border border-royal-line bg-transparent py-2.5 pl-10 pr-4 text-sm text-royal-cream placeholder:text-royal-dim/50 focus:border-royal-accent focus:outline-none"
-            />
+          <div className="mb-3 flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-royal-dim" strokeWidth={1.75} />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search the menu…"
+                className="w-full border border-royal-line bg-transparent py-2.5 pl-10 pr-4 text-sm text-royal-cream placeholder:text-royal-dim/50 focus:border-royal-accent focus:outline-none"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                window.open("/display", "rbk-customer-display", "popup")
+              }
+              title="Open the customer display (move it to the second screen)"
+              className="flex shrink-0 items-center gap-2 border border-royal-line px-3 py-2.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-royal-dim transition-colors hover:border-royal-accent hover:text-royal-accent"
+            >
+              <MonitorPlay className="h-4 w-4" strokeWidth={1.75} />
+              <span className="hidden sm:inline">Customer display</span>
+            </button>
           </div>
           <div className="royal-scroll flex gap-2 overflow-x-auto pb-1">
             <CategoryChip
@@ -295,6 +377,7 @@ export default function PosPage() {
           discount={discount}
           onCancel={() => setCheckoutOpen(false)}
           onCompleted={handleCompleted}
+          onProgress={setPaymentProgress}
         />
       )}
 

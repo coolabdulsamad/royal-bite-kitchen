@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Loader2, Plus, Trash2, X } from "lucide-react";
 import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/lib/auth";
@@ -40,12 +40,18 @@ export function CheckoutModal({
   discount,
   onCancel,
   onCompleted,
+  onProgress,
 }: {
   totalKobo: number;
   lines: Array<{ itemId: number; quantity: number; optionIds: number[] }>;
   discount: { type: "percent" | "fixed"; value: number } | null;
   onCancel: () => void;
   onCompleted: (sale: CompletedSaleResult) => void;
+  /** live payment progress for the customer display */
+  onProgress?: (progress: {
+    paidKobo: number;
+    payments: Array<{ label: string; amountKobo: number }>;
+  }) => void;
 }) {
   const { user } = useAuth();
   const [rows, setRows] = useState<PaymentRow[]>([
@@ -67,6 +73,22 @@ export function CheckoutModal({
   );
   const remainingKobo = totalKobo - paidKobo;
   const changeKobo = Math.max(0, -remainingKobo);
+
+  // Report live payment progress (customer display mirrors this)
+  useEffect(() => {
+    onProgress?.({
+      paidKobo,
+      payments: rows
+        .map((r) => {
+          const n = Number.parseFloat(r.amount);
+          return Number.isFinite(n) && n > 0
+            ? { label: PAYMENT_METHOD_LABEL[r.method], amountKobo: nairaToKobo(n) }
+            : null;
+        })
+        .filter((p): p is { label: string; amountKobo: number } => p !== null),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paidKobo, rows, totalKobo]);
 
   function setRow(index: number, patch: Partial<PaymentRow>) {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
