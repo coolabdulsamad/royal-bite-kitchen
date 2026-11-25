@@ -1,15 +1,5 @@
 import { SectionPlaceholder } from "@/components/shell/SectionPlaceholder";
 
-export function PosPage() {
-  return (
-    <SectionPlaceholder
-      title="New Sale"
-      phase="Phase 1 · Step 5"
-      description="The cashier screen: touch-friendly menu grid, live cart, split payments across cash, bank POS and transfer, discounts with permission limits, held orders, and instant receipt printing."
-    />
-  );
-}
-
 export function OrdersPage() {
   return (
     <SectionPlaceholder

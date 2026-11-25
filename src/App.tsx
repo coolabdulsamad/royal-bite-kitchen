@@ -5,8 +5,8 @@ import Login from "@/pages/Login";
 import StaffPage from "@/pages/Staff";
 import AccountPage from "@/pages/Account";
 import MenuPage from "@/pages/Menu";
+import PosPage from "@/pages/Pos";
 import {
-  PosPage,
   OrdersPage,
   SalesPage,
   CustomersPage,

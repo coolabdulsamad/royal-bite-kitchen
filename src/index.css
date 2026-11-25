@@ -118,3 +118,41 @@ body {
   outline: 2px solid #9333ea;
   outline-offset: 2px;
 }
+
+/* datetime-local picker legibility on dark theme */
+.royal-date {
+  color-scheme: dark;
+}
+
+/* ---------------------------------------------------------------------------
+   Receipt printing: only the receipt paper shows on paper (72/80mm thermal).
+--------------------------------------------------------------------------- */
+@media print {
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+  body * {
+    visibility: hidden;
+  }
+  #receipt-paper,
+  #receipt-paper * {
+    visibility: visible;
+  }
+  #receipt-paper {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 72mm;
+    padding: 2mm;
+    margin: 0;
+    background: #fff !important;
+    color: #000 !important;
+    font-size: 11px;
+  }
+}
+
+@page {
+  size: 80mm auto;
+  margin: 0;
+}

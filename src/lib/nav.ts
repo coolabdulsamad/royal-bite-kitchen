@@ -30,7 +30,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Service",
     items: [
-      { title: "New Sale", path: "/pos", icon: ShoppingCart, phase: "Phase 1 · Step 5", minRole: "sales" },
+      { title: "New Sale", path: "/pos", icon: ShoppingCart, phase: "Live", minRole: "sales" },
       { title: "Orders", path: "/orders", icon: ClipboardList, phase: "Phase 2", minRole: "sales" },
       { title: "Sales History", path: "/sales", icon: History, phase: "Phase 1 · Step 9", minRole: "sales" },
     ],

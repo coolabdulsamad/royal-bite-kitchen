@@ -140,3 +140,75 @@ export type Category = typeof categories.$inferSelect;
 export type MenuItem = typeof menuItems.$inferSelect;
 export type ModifierGroup = typeof modifierGroups.$inferSelect;
 export type ModifierOption = typeof modifierOptions.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// Sales — line prices/modifiers are SNAPSHOTS: editing the menu later never
+// rewrites history. Money stays in integer kobo.
+// ---------------------------------------------------------------------------
+
+export const sales = mysqlTable("sales", {
+  id: serial("id").primaryKey(),
+  receiptNo: varchar("receipt_no", { length: 20 }).notNull().unique(),
+  staffId: bigint("staff_id", { mode: "number", unsigned: true })
+    .notNull()
+    .references(() => users.id),
+  subtotalKobo: int("subtotal_kobo").notNull(),
+  discountKobo: int("discount_kobo").notNull().default(0),
+  totalKobo: int("total_kobo").notNull(),
+  status: mysqlEnum("status", ["completed", "held", "returned"])
+    .notNull()
+    .default("completed"),
+  /** Business date of the sale — usually now, but manager+ can backdate. */
+  soldAt: timestamp("sold_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const saleItems = mysqlTable("sale_items", {
+  id: serial("id").primaryKey(),
+  saleId: bigint("sale_id", { mode: "number", unsigned: true })
+    .notNull()
+    .references(() => sales.id),
+  /** Kept for analytics; nullable so deleting a menu item keeps history. */
+  itemId: bigint("item_id", { mode: "number", unsigned: true }).references(
+    () => menuItems.id,
+  ),
+  itemName: varchar("item_name", { length: 120 }).notNull(),
+  unitPriceKobo: int("unit_price_kobo").notNull(),
+  /** JSON snapshot: [{group, option, priceDeltaKobo}] */
+  modifiersJson: varchar("modifiers_json", { length: 2000 }),
+  quantity: int("quantity").notNull(),
+  lineTotalKobo: int("line_total_kobo").notNull(),
+});
+
+export const salePayments = mysqlTable("sale_payments", {
+  id: serial("id").primaryKey(),
+  saleId: bigint("sale_id", { mode: "number", unsigned: true })
+    .notNull()
+    .references(() => sales.id),
+  method: mysqlEnum("method", ["cash", "bank_pos", "transfer"]).notNull(),
+  amountKobo: int("amount_kobo").notNull(),
+  reference: varchar("reference", { length: 120 }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const salesRelations = relations(sales, ({ one, many }) => ({
+  staff: one(users, { fields: [sales.staffId], references: [users.id] }),
+  items: many(saleItems),
+  payments: many(salePayments),
+}));
+
+export const saleItemsRelations = relations(saleItems, ({ one }) => ({
+  sale: one(sales, { fields: [saleItems.saleId], references: [sales.id] }),
+  item: one(menuItems, {
+    fields: [saleItems.itemId],
+    references: [menuItems.id],
+  }),
+}));
+
+export const salePaymentsRelations = relations(salePayments, ({ one }) => ({
+  sale: one(sales, { fields: [salePayments.saleId], references: [sales.id] }),
+}));
+
+export type Sale = typeof sales.$inferSelect;
+export type SaleItem = typeof saleItems.$inferSelect;
+export type SalePayment = typeof salePayments.$inferSelect;
