@@ -4,7 +4,7 @@ import { and, desc, eq, gte, inArray, like, lte, sql } from "drizzle-orm";
 import { createRouter } from "../middleware";
 import { authedProcedure, roleProcedure } from "../auth/guards";
 import { getDb } from "../queries/connection";
-import { orders, saleItems, salePayments, sales, users } from "@db/schema";
+import { orderItems, orders, saleItems, salePayments, sales, users } from "@db/schema";
 import { nairaToKobo } from "@contracts/money";
 import { DISCOUNT_LIMIT_PERCENT } from "@contracts/payments";
 import { ROLE_LEVEL } from "@contracts/roles";
@@ -24,6 +24,9 @@ export const salesRouter = createRouter({
   completeSale: authedProcedure
     .input(
       z.object({
+        /** Ignored when paying an order (orderId set): the order's stored
+         *  lines are charged instead, so the receipt always matches the
+         *  board — including partner orders with partner prices. */
         items: z
           .array(
             z.object({
@@ -32,7 +35,6 @@ export const salesRouter = createRouter({
               optionIds: z.array(z.number().int().positive()).max(20).default([]),
             }),
           )
-          .min(1)
           .max(100),
         discount: z
           .object({
@@ -120,8 +122,72 @@ export const salesRouter = createRouter({
       const replayed = await replayExisting();
       if (replayed) return replayed;
 
-      // -------------------------------------- price the basket (shared logic)
-      const { pricedLines, subtotalKobo } = await priceOrderLines(db, input.items);
+      // --------------------------------------------- source the sale lines
+      // Paying a kitchen order? Fail fast with a clear error before charging,
+      // then charge the order's STORED lines (partner prices included).
+      let pricedLines: Array<{
+        itemId: number | null;
+        itemName: string;
+        unitPriceKobo: number;
+        quantity: number;
+        modifiers: ModifierSnapshot[];
+        lineTotalKobo: number;
+      }>;
+      let subtotalKobo: number;
+      if (input.orderId !== undefined) {
+        const [ord] = await db
+          .select({ id: orders.id, status: orders.status, saleId: orders.saleId })
+          .from(orders)
+          .where(eq(orders.id, input.orderId))
+          .limit(1);
+        if (!ord) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Order not found" });
+        }
+        if (ord.status === "cancelled") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "That order was cancelled — it can't be paid",
+          });
+        }
+        if (ord.status === "completed" || ord.saleId !== null) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "That order was already paid — refresh the orders board",
+          });
+        }
+        const orderLines = await db
+          .select()
+          .from(orderItems)
+          .where(eq(orderItems.orderId, input.orderId));
+        if (orderLines.length === 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "That order has no lines — cancel it and re-enter it",
+          });
+        }
+        pricedLines = orderLines.map((l) => ({
+          itemId: l.itemId,
+          itemName: l.itemName,
+          unitPriceKobo: l.unitPriceKobo,
+          quantity: l.quantity,
+          modifiers: l.modifiersJson
+            ? (JSON.parse(l.modifiersJson) as ModifierSnapshot[])
+            : [],
+          lineTotalKobo: l.lineTotalKobo,
+        }));
+        subtotalKobo = pricedLines.reduce((s, l) => s + l.lineTotalKobo, 0);
+      } else {
+        if (input.items.length === 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Add at least one item",
+          });
+        }
+        // -------------------------------------- price the basket (shared logic)
+        const priced = await priceOrderLines(db, input.items);
+        pricedLines = priced.pricedLines;
+        subtotalKobo = priced.subtotalKobo;
+      }
 
       // ------------------------------------------------------------ discount
       let discountKobo = 0;
@@ -216,29 +282,6 @@ export const salesRouter = createRouter({
       }
 
       // ------------------------------------------------------------- persist
-      // Paying a kitchen order? Fail fast with a clear error before charging.
-      if (input.orderId !== undefined) {
-        const [ord] = await db
-          .select({ id: orders.id, status: orders.status, saleId: orders.saleId })
-          .from(orders)
-          .where(eq(orders.id, input.orderId))
-          .limit(1);
-        if (!ord) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "Order not found" });
-        }
-        if (ord.status === "cancelled") {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "That order was cancelled — it can't be paid",
-          });
-        }
-        if (ord.status === "completed" || ord.saleId !== null) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "That order was already paid — refresh the orders board",
-          });
-        }
-      }
       try {
         const result = await db.transaction(async (tx) => {
           const [saleRow] = await tx

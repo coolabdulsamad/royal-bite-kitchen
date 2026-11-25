@@ -234,3 +234,41 @@ describe("kitchenTicketToEscPos", () => {
     expect(text).not.toContain("NOTE:");
   });
 });
+
+describe("kitchenTicketToEscPos — delivery block", () => {
+  const BASE: KitchenTicketData = {
+    orderNo: "ORD-000021",
+    label: "Ada Obi",
+    notes: null,
+    staffName: "Glovo",
+    placedAt: "2026-11-26T05:20:00.000Z",
+    lines: [{ itemName: "Peppered Chicken", quantity: 2, modifiers: [] }],
+  };
+
+  it("prints source, phone and wrapped address for delivery orders", () => {
+    const text = decode(
+      kitchenTicketToEscPos({
+        ...BASE,
+        delivery: {
+          source: "Glovo",
+          customerName: "Ada Obi",
+          customerPhone: "08031234567",
+          deliveryAddress:
+            "12 Admiralty Way, Lekki Phase 1, Lagos — blue gate",
+        },
+      }),
+    );
+    expect(text).toContain("GLOVO DELIVERY");
+    expect(text).toContain("08031234567");
+    expect(text).toContain("To: 12 Admiralty Way");
+    // no prices even on delivery tickets
+    expect(text).not.toContain("₦");
+    expect(text).not.toContain("NGN");
+  });
+
+  it("omits the delivery section entirely for counter orders", () => {
+    const text = decode(kitchenTicketToEscPos(BASE));
+    expect(text).not.toContain("DELIVERY");
+    expect(text).not.toContain("To:");
+  });
+});

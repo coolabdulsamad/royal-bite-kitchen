@@ -69,7 +69,9 @@ export default function PosPage() {
         orderNo: string;
         label: string;
         lines: Array<{
-          itemId: number;
+          /** null for partner items with no menu match — display only (id 0),
+           *  the server charges the order's stored lines anyway. */
+          itemId: number | null;
           itemName: string;
           unitPriceKobo: number;
           quantity: number;
@@ -77,9 +79,12 @@ export default function PosPage() {
         }>;
       };
       setCart(
-        payload.lines.map((l) => ({
-          key: makeCartKey(l.itemId, l.modifiers.map((m) => m.optionId)),
-          itemId: l.itemId,
+        payload.lines.map((l, i) => ({
+          key:
+            l.itemId !== null
+              ? makeCartKey(l.itemId, l.modifiers.map((m) => m.optionId))
+              : `orderline:${payload.orderId}:${i}`,
+          itemId: l.itemId ?? 0,
           name: l.itemName,
           unitPriceKobo: l.unitPriceKobo,
           modifiers: l.modifiers,
@@ -234,7 +239,10 @@ export default function PosPage() {
   async function submitSale(input: CheckoutSubmitInput): Promise<CompletedSaleResult> {
     const clientRef = crypto.randomUUID();
     const payload: OfflineSalePayload = {
-      items: input.items,
+      // Paying an order: the server charges the order's stored lines, so the
+      // cart payload is irrelevant — and unmapped partner lines (itemId 0)
+      // would fail validation if sent.
+      items: orderHandoff ? [] : input.items,
       discount: input.discount,
       payments: input.payments,
       saleDate: input.saleDate,
@@ -380,7 +388,12 @@ export default function PosPage() {
             </span>
             <button
               type="button"
-              onClick={() => setOrderHandoff(null)}
+              onClick={() => {
+                setOrderHandoff(null);
+                // Partner lines (itemId 0) only make sense as an order
+                // payment — they can't be re-priced as a normal sale.
+                setCart((prev) => prev.filter((l) => l.itemId !== 0));
+              }}
               className="shrink-0 underline decoration-dotted underline-offset-4 transition-colors hover:text-emerald-200"
             >
               Detach order

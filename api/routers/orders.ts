@@ -94,18 +94,27 @@ export const ordersRouter = createRouter({
         status: z
           .enum(["active", "all", ...ORDER_STATUSES])
           .default("active"),
+        /** "delivery" = any partner source; omitted = everything. */
+        source: z.enum(["pos", "delivery"]).optional(),
         limit: z.number().int().min(1).max(200).default(100),
       }),
     )
     .query(async ({ input }) => {
       const db = getDb();
       const active = input.status === "active";
-      const where =
-        input.status === "all"
-          ? undefined
-          : active
+      const conditions = [];
+      if (input.status !== "all") {
+        conditions.push(
+          active
             ? inArray(orders.status, [...ACTIVE_ORDER_STATUSES])
-            : eq(orders.status, input.status);
+            : eq(orders.status, input.status),
+        );
+      }
+      if (input.source === "pos") conditions.push(eq(orders.source, "pos"));
+      if (input.source === "delivery") {
+        conditions.push(notInArray(orders.source, ["pos"]));
+      }
+      const where = conditions.length > 0 ? and(...conditions) : undefined;
 
       const rows = await db
         .select({
@@ -123,6 +132,12 @@ export const ordersRouter = createRouter({
           updatedAt: orders.updatedAt,
           cancelledAt: orders.cancelledAt,
           cancelReason: orders.cancelReason,
+          source: orders.source,
+          externalId: orders.externalId,
+          customerName: orders.customerName,
+          customerPhone: orders.customerPhone,
+          deliveryAddress: orders.deliveryAddress,
+          kitchenPrintedAt: orders.kitchenPrintedAt,
         })
         .from(orders)
         .leftJoin(users, eq(users.id, orders.staffId))
@@ -147,6 +162,7 @@ export const ordersRouter = createRouter({
         createdAt: r.createdAt.toISOString(),
         updatedAt: r.updatedAt.toISOString(),
         cancelledAt: r.cancelledAt ? r.cancelledAt.toISOString() : null,
+        kitchenPrintedAt: r.kitchenPrintedAt ? r.kitchenPrintedAt.toISOString() : null,
         lines: lines
           .filter((l) => l.orderId === r.id)
           .map((l) => ({
@@ -273,6 +289,33 @@ export const ordersRouter = createRouter({
         });
       }
       return { ok: true as const, orderId: order.id, orderNo: order.orderNo };
+    }),
+
+  /**
+   * Claim partner tickets for kitchen printing. Each id is claimed with a
+   * conditional UPDATE (kitchen_printed_at IS NULL, partner sources only) so
+   * when several board screens poll at once, exactly one prints each ticket.
+   * Returns the ids THIS caller claimed — print only those.
+   */
+  markTicketsPrinted: authedProcedure
+    .input(z.object({ orderIds: z.array(z.number().int().positive()).min(1).max(20) }))
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      const claimed: number[] = [];
+      for (const id of input.orderIds) {
+        const [result] = await db
+          .update(orders)
+          .set({ kitchenPrintedAt: new Date() })
+          .where(
+            and(
+              eq(orders.id, id),
+              isNull(orders.kitchenPrintedAt),
+              notInArray(orders.source, ["pos"]),
+            ),
+          );
+        if (result.affectedRows === 1) claimed.push(id);
+      }
+      return { ok: true as const, claimed };
     }),
 });
 

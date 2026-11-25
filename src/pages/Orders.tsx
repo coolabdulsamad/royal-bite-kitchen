@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import {
+  Bike,
   ChefHat,
   CircleDollarSign,
   Clock3,
+  Plug,
   Plus,
   Printer,
   RefreshCw,
@@ -21,16 +23,19 @@ import {
   ORDER_STATUS_LABEL,
   type OrderStatus,
 } from "@contracts/orders";
+import { ORDER_SOURCE_LABEL } from "@contracts/partners";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../api/router";
 import { NewOrderModal } from "./orders/NewOrderModal";
+import { PartnersModal } from "./orders/PartnersModal";
 
 type BoardOrder = inferRouterOutputs<AppRouter>["orders"]["list"][number];
 
-type Filter = "active" | "all" | OrderStatus;
+type Filter = "active" | "all" | "delivery" | OrderStatus;
 
 const FILTERS: Array<{ key: Filter; label: string }> = [
   { key: "active", label: "Kitchen board" },
+  { key: "delivery", label: "Delivery" },
   { key: "placed", label: "Placed" },
   { key: "preparing", label: "Preparing" },
   { key: "ready", label: "Ready" },
@@ -39,6 +44,30 @@ const FILTERS: Array<{ key: Filter; label: string }> = [
   { key: "cancelled", label: "Cancelled" },
   { key: "all", label: "All" },
 ];
+
+/** Two-tone kitchen beep for newly arrived delivery orders (WebAudio). */
+function beepNewOrder() {
+  try {
+    const Ctx = window.AudioContext;
+    const ctx = new Ctx();
+    const play = (freq: number, start: number, dur: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = freq;
+      osc.type = "square";
+      gain.gain.setValueAtTime(0.08, ctx.currentTime + start);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(ctx.currentTime + start);
+      osc.stop(ctx.currentTime + start + dur);
+    };
+    play(880, 0, 0.15);
+    play(1174, 0.18, 0.25);
+    setTimeout(() => ctx.close(), 800);
+  } catch {
+    /* audio blocked until a user gesture — silent skip */
+  }
+}
 
 const BOARD_COLUMNS: OrderStatus[] = ["placed", "preparing", "ready", "served"];
 
@@ -59,6 +88,7 @@ export default function OrdersPage() {
 
   const [filter, setFilter] = useState<Filter>("active");
   const [newOpen, setNewOpen] = useState(false);
+  const [partnersOpen, setPartnersOpen] = useState(false);
   const [cancelling, setCancelling] = useState<BoardOrder | null>(null);
   const [printHint, setPrintHint] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -70,7 +100,9 @@ export default function OrdersPage() {
   }, []);
 
   const query = trpc.orders.list.useQuery(
-    { status: filter },
+    filter === "delivery"
+      ? { status: "active", source: "delivery" }
+      : { status: filter },
     { refetchInterval: 15_000 },
   );
   const utils = trpc.useUtils();
@@ -83,17 +115,55 @@ export default function OrdersPage() {
       setCancelling(null);
     },
   });
+  const claimPrinted = trpc.orders.markTicketsPrinted.useMutation();
 
   const orders = useMemo(() => query.data ?? [], [query.data]);
 
-  function payOrder(order: BoardOrder) {
-    const missing = order.lines.filter((l) => l.itemId === null);
-    if (missing.length > 0) {
-      setPrintHint(
-        `"${missing[0].itemName}" was removed from the menu — a manager should cancel this order and re-enter it.`,
-      );
+  // ── New delivery orders: beep + auto-print the kitchen ticket ──
+  // The claim mutation makes exactly one board screen print each ticket, even
+  // with the till and the kitchen display polling at the same time.
+  const seenRef = useRef<Set<number> | null>(null);
+  useEffect(() => {
+    if (!query.data) return;
+    const partnerActive = query.data.filter(
+      (o) =>
+        o.source !== "pos" &&
+        (ACTIVE_ORDER_STATUSES as readonly string[]).includes(o.status),
+    );
+    if (seenRef.current === null) {
+      // First load: everything already on the board is "seen" — no beep storm.
+      seenRef.current = new Set(partnerActive.map((o) => o.id));
       return;
     }
+    const seen = seenRef.current;
+    const fresh = partnerActive.filter((o) => !seen.has(o.id));
+    if (fresh.length === 0) return;
+    for (const o of fresh) seen.add(o.id);
+    beepNewOrder();
+    const unprinted = fresh.filter((o) => o.kitchenPrintedAt === null);
+    if (
+      unprinted.length > 0 &&
+      printerSettings.autoPrint &&
+      direct !== null &&
+      !claimPrinted.isPending
+    ) {
+      claimPrinted.mutate(
+        { orderIds: unprinted.map((o) => o.id) },
+        {
+          onSuccess: (r) => {
+            for (const id of r.claimed) {
+              const order = unprinted.find((o) => o.id === id);
+              if (order) void printTicket(order, true);
+            }
+            if (r.claimed.length > 0) utils.orders.list.invalidate();
+          },
+        },
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query.data]);
+
+  function payOrder(order: BoardOrder) {
     sessionStorage.setItem(
       "rbk.pos.payOrder",
       JSON.stringify({
@@ -117,27 +187,37 @@ export default function OrdersPage() {
     navigate("/pos");
   }
 
-  async function printTicket(order: BoardOrder) {
+  async function printTicket(order: BoardOrder, silent = false) {
     try {
       const result = await printerManager.printKitchenTicket({
         orderNo: order.orderNo,
         label: order.label,
         notes: order.notes,
-        staffName: order.staffName ?? "Staff",
+        staffName: order.staffName ?? ORDER_SOURCE_LABEL[order.source],
         placedAt: order.createdAt,
+        delivery:
+          order.source === "pos"
+            ? null
+            : {
+                source: ORDER_SOURCE_LABEL[order.source],
+                customerName: order.customerName,
+                customerPhone: order.customerPhone,
+                deliveryAddress: order.deliveryAddress,
+              },
         lines: order.lines.map((l) => ({
           itemName: l.itemName,
           quantity: l.quantity,
           modifiers: l.modifiers.map((m) => ({ group: m.group, option: m.option })),
         })),
       });
+      if (silent) return;
       if (result === "skipped") {
         setPrintHint("Connect a thermal printer (printer menu in the header) to print kitchen tickets.");
       } else {
         setPrintHint(null);
       }
     } catch {
-      setPrintHint("Printing failed — check the printer and try again.");
+      if (!silent) setPrintHint("Printing failed — check the printer and try again.");
     }
   }
 
@@ -154,6 +234,17 @@ export default function OrdersPage() {
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          {isManager && (
+            <button
+              type="button"
+              onClick={() => setPartnersOpen(true)}
+              title="Delivery partner connections (Glovo / Chowdeck)"
+              className="flex items-center gap-2 rounded-full border border-royal-line px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.15em] text-royal-dim transition-colors hover:border-royal-accent hover:text-royal-accent"
+            >
+              <Plug className="h-4 w-4" strokeWidth={1.75} />
+              Partners
+            </button>
+          )}
           <button
             type="button"
             onClick={() => query.refetch()}
@@ -290,6 +381,8 @@ export default function OrdersPage() {
         />
       )}
 
+      {partnersOpen && <PartnersModal onClose={() => setPartnersOpen(false)} />}
+
       {cancelling && (
         <CancelModal
           order={cancelling}
@@ -347,9 +440,22 @@ function TicketCard({
           : "border-royal-line"
       }`}
     >
-      {/* Top row: order no + elapsed / status */}
+      {/* Top row: order no + source badge + elapsed / status */}
       <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-royal-cream">{order.orderNo}</p>
+        <p className="flex items-center gap-2 text-sm font-semibold text-royal-cream">
+          {order.orderNo}
+          {order.source !== "pos" && (
+            <span
+              className={`border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] ${
+                order.source === "glovo"
+                  ? "border-amber-400/50 text-amber-300"
+                  : "border-teal-400/50 text-teal-300"
+              }`}
+            >
+              {ORDER_SOURCE_LABEL[order.source]}
+            </span>
+          )}
+        </p>
         {active ? (
           <span
             className={`flex items-center gap-1 border px-2 py-0.5 text-[10px] font-semibold ${elapsedTone}`}
@@ -377,6 +483,23 @@ function TicketCard({
       <p className="mt-1 font-display text-xl leading-tight text-royal-cream">
         {order.label}
       </p>
+
+      {/* Delivery details for partner orders */}
+      {order.source !== "pos" && (
+        <div className="mt-2 space-y-0.5 border border-royal-line/70 bg-royal-surface/40 px-2 py-1.5 text-xs text-royal-dim">
+          <p className="flex items-center gap-1.5">
+            <Bike className="h-3 w-3 shrink-0" strokeWidth={1.75} />
+            <span>
+              {ORDER_SOURCE_LABEL[order.source]} delivery
+              {order.externalId ? ` · ${order.externalId}` : ""}
+            </span>
+          </p>
+          {order.customerPhone && <p className="pl-[18px]">{order.customerPhone}</p>}
+          {order.deliveryAddress && (
+            <p className="pl-[18px]">{order.deliveryAddress}</p>
+          )}
+        </div>
+      )}
 
       {order.notes && (
         <p className="mt-2 border border-amber-400/40 bg-amber-400/10 px-2 py-1 text-xs text-amber-300">
@@ -412,7 +535,7 @@ function TicketCard({
 
       <p className="mt-3 flex items-baseline justify-between border-t border-royal-line/60 pt-2 text-xs text-royal-dim">
         <span>
-          {order.staffName ?? "Staff"} ·{" "}
+          {order.staffName ?? ORDER_SOURCE_LABEL[order.source]} ·{" "}
           {new Date(order.createdAt).toLocaleTimeString("en-NG", {
             hour: "2-digit",
             minute: "2-digit",

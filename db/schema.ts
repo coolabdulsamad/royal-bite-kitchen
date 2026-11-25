@@ -7,6 +7,7 @@ import {
   mysqlTable,
   serial,
   timestamp,
+  uniqueIndex,
   varchar,
 } from "drizzle-orm/mysql-core";
 import { STAFF_ROLES } from "../contracts/roles";
@@ -226,45 +227,95 @@ export type SaleItem = typeof saleItems.$inferSelect;
 export type SalePayment = typeof salePayments.$inferSelect;
 
 /**
- * Kitchen orders — taken by waiters/cashiers before payment. The kitchen works
- * the ticket (placed → preparing → ready → served); paying links the order to
- * a sale (status completed). Prices are snapshotted at order time exactly like
- * sale lines, but the payment re-prices the cart — this total is indicative.
+ * Delivery-partner webhook connections (Glovo / Chowdeck). Each connection
+ * owns a secret token the partner sends as x-rbk-webhook-token; the token is
+ * generated on create/rotate and shown to staff exactly once. Manager+ only.
  */
-export const orders = mysqlTable("orders", {
+export const partnerConnections = mysqlTable("partner_connections", {
   id: serial("id").primaryKey(),
-  orderNo: varchar("order_no", { length: 20 }).notNull().unique(),
-  status: mysqlEnum("status", [
-    "placed",
-    "preparing",
-    "ready",
-    "served",
-    "completed",
-    "cancelled",
-  ])
-    .notNull()
-    .default("placed"),
-  /** Table number, customer name or pickup tag — kitchen needs to know. */
-  label: varchar("label", { length: 64 }).notNull(),
-  notes: varchar("notes", { length: 500 }),
-  staffId: bigint("staff_id", { mode: "number", unsigned: true })
-    .notNull()
-    .references(() => users.id),
-  /** Set when the order is paid — one order, at most one sale. */
-  saleId: bigint("sale_id", { mode: "number", unsigned: true }).references(
-    () => sales.id,
+  provider: mysqlEnum("provider", ["glovo", "chowdeck"]).notNull(),
+  /** Staff-facing name, e.g. "Glovo — Lekki store". */
+  name: varchar("name", { length: 64 }).notNull(),
+  /** Bearer-style secret compared on every webhook call. */
+  token: varchar("token", { length: 80 }).notNull().unique(),
+  /** Partner-side store/branch reference (optional, informational). */
+  storeRef: varchar("store_ref", { length: 64 }),
+  active: boolean("active").notNull().default(true),
+  createdById: bigint("created_by_id", { mode: "number", unsigned: true }).references(
+    () => users.id,
   ),
-  totalKobo: int("total_kobo").notNull(),
+  lastOrderAt: timestamp("last_order_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
-  /** Cancel metadata — set together (manager+ only). */
-  cancelledAt: timestamp("cancelled_at"),
-  cancelledById: bigint("cancelled_by_id", {
-    mode: "number",
-    unsigned: true,
-  }).references(() => users.id),
-  cancelReason: varchar("cancel_reason", { length: 255 }),
 });
+
+export type PartnerConnection = typeof partnerConnections.$inferSelect;
+
+/**
+ * Kitchen orders — taken by waiters/cashiers before payment, or ingested from
+ * a delivery partner (Glovo / Chowdeck webhook). The kitchen works the ticket
+ * (placed → preparing → ready → served); paying links the order to a sale
+ * (status completed). Paying an order always charges the STORED order lines —
+ * the board total and the receipt total can never diverge, and partner prices
+ * (what the customer already paid) are preserved exactly.
+ */
+export const orders = mysqlTable(
+  "orders",
+  {
+    id: serial("id").primaryKey(),
+    orderNo: varchar("order_no", { length: 20 }).notNull().unique(),
+    status: mysqlEnum("status", [
+      "placed",
+      "preparing",
+      "ready",
+      "served",
+      "completed",
+      "cancelled",
+    ])
+      .notNull()
+      .default("placed"),
+    /** Table number, customer name or pickup tag — kitchen needs to know. */
+    label: varchar("label", { length: 64 }).notNull(),
+    notes: varchar("notes", { length: 500 }),
+    /** Null for partner-ingested orders (no staff member took them). */
+    staffId: bigint("staff_id", { mode: "number", unsigned: true }).references(
+      () => users.id,
+    ),
+    /** Set when the order is paid — one order, at most one sale. */
+    saleId: bigint("sale_id", { mode: "number", unsigned: true }).references(
+      () => sales.id,
+    ),
+    totalKobo: int("total_kobo").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    /** Cancel metadata — set together (manager+ only). */
+    cancelledAt: timestamp("cancelled_at"),
+    cancelledById: bigint("cancelled_by_id", {
+      mode: "number",
+      unsigned: true,
+    }).references(() => users.id),
+    cancelReason: varchar("cancel_reason", { length: 255 }),
+    // --------------------------------------------------- delivery partner
+    /** Where this order came from. "pos" = taken on a till. */
+    source: mysqlEnum("source", ["pos", "glovo", "chowdeck"])
+      .notNull()
+      .default("pos"),
+    /** Partner's own order id — unique per source, makes webhooks idempotent. */
+    externalId: varchar("external_id", { length: 64 }),
+    partnerConnectionId: bigint("partner_connection_id", {
+      mode: "number",
+      unsigned: true,
+    }).references(() => partnerConnections.id),
+    customerName: varchar("customer_name", { length: 120 }),
+    customerPhone: varchar("customer_phone", { length: 40 }),
+    deliveryAddress: varchar("delivery_address", { length: 255 }),
+    /** Claimed by the first board screen that printed the kitchen ticket. */
+    kitchenPrintedAt: timestamp("kitchen_printed_at"),
+  },
+  (table) => [
+    // NULL external_id rows (counter orders) never collide in MySQL uniques.
+    uniqueIndex("orders_source_external_unique").on(table.source, table.externalId),
+  ],
+);
 
 export const orderItems = mysqlTable("order_items", {
   id: serial("id").primaryKey(),
@@ -286,6 +337,10 @@ export const orderItems = mysqlTable("order_items", {
 export const ordersRelations = relations(orders, ({ one, many }) => ({
   staff: one(users, { fields: [orders.staffId], references: [users.id] }),
   sale: one(sales, { fields: [orders.saleId], references: [sales.id] }),
+  partnerConnection: one(partnerConnections, {
+    fields: [orders.partnerConnectionId],
+    references: [partnerConnections.id],
+  }),
   items: many(orderItems),
 }));
 

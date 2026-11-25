@@ -209,6 +209,13 @@ export interface KitchenTicketData {
   staffName: string;
   /** ISO datetime the order was placed */
   placedAt: string;
+  /** Delivery-partner block — printed bold so the rider details stand out. */
+  delivery?: {
+    source: string;
+    customerName: string | null;
+    customerPhone: string | null;
+    deliveryAddress: string | null;
+  } | null;
   lines: Array<{
     itemName: string;
     quantity: number;
@@ -238,6 +245,22 @@ export function kitchenTicketToEscPos(
   b.raw(...sizeCmd(false, false)).raw(...boldCmd(false));
   b.center(formatReceiptDate(ticket.placedAt), width);
   b.center(`Taken by ${ticket.staffName}`, width);
+  if (ticket.delivery) {
+    b.raw(...alignCmd(0)).separator(width);
+    b.raw(...boldCmd(true));
+    b.center(`${ticket.delivery.source.toUpperCase()} DELIVERY`, width);
+    b.raw(...boldCmd(false));
+    b.raw(...alignCmd(1));
+    if (ticket.delivery.customerPhone) {
+      b.center(ticket.delivery.customerPhone, width);
+    }
+    if (ticket.delivery.deliveryAddress) {
+      b.raw(...alignCmd(0));
+      for (const chunk of wrapText(`To: ${ticket.delivery.deliveryAddress}`, width)) {
+        b.line(chunk);
+      }
+    }
+  }
   b.raw(...alignCmd(0)).separator(width);
 
   for (const line of ticket.lines) {
