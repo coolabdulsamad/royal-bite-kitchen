@@ -183,6 +183,53 @@ export type Customer = typeof customers.$inferSelect;
 export type CustomerPayment = typeof customerPayments.$inferSelect;
 
 // ---------------------------------------------------------------------------
+// Stock — ingredients & supplies. Quantities are integer MILLI-UNITS
+// (1 unit = 1000) so 2.5 kg stays exact without float errors. Every change
+// is a movement row with the staff member who recorded it.
+// ---------------------------------------------------------------------------
+
+export const stockItems = mysqlTable("stock_items", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 120 }).notNull(),
+  /** Display unit: kg, L, pack, bottle, pcs, crate… */
+  unit: varchar("unit", { length: 20 }).notNull(),
+  /** Current quantity × 1000. */
+  quantityMilli: int("quantity_milli").notNull().default(0),
+  /** Low-stock warning threshold × 1000 (null = no warning). */
+  lowStockAtMilli: int("low_stock_at_milli"),
+  /** Last known cost per unit, informational (kobo). */
+  costPerUnitKobo: int("cost_per_unit_kobo"),
+  active: boolean("active").notNull().default(true),
+  createdById: bigint("created_by_id", { mode: "number", unsigned: true }).references(
+    () => users.id,
+  ),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const stockMovements = mysqlTable("stock_movements", {
+  id: serial("id").primaryKey(),
+  itemId: bigint("item_id", { mode: "number", unsigned: true })
+    .notNull()
+    .references(() => stockItems.id),
+  /** restock +, usage −, waste −, adjustment ± (manager only). */
+  type: mysqlEnum("type", ["restock", "usage", "waste", "adjustment"]).notNull(),
+  /** Signed quantity change × 1000. */
+  deltaMilli: int("delta_milli").notNull(),
+  /** Quantity after this movement × 1000 (audit snapshot). */
+  balanceAfterMilli: int("balance_after_milli").notNull(),
+  /** Restock cost, informational for now — feeds expenses in a later step. */
+  totalCostKobo: int("total_cost_kobo"),
+  note: varchar("note", { length: 255 }),
+  staffId: bigint("staff_id", { mode: "number", unsigned: true })
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type StockItem = typeof stockItems.$inferSelect;
+export type StockMovement = typeof stockMovements.$inferSelect;
+
+// ---------------------------------------------------------------------------
 // Sales — line prices/modifiers are SNAPSHOTS: editing the menu later never
 // rewrites history. Money stays in integer kobo.
 // ---------------------------------------------------------------------------
@@ -300,6 +347,21 @@ export const customerPaymentsRelations = relations(customerPayments, ({ one }) =
   }),
   receivedBy: one(users, {
     fields: [customerPayments.receivedById],
+    references: [users.id],
+  }),
+}));
+
+export const stockItemsRelations = relations(stockItems, ({ many }) => ({
+  movements: many(stockMovements),
+}));
+
+export const stockMovementsRelations = relations(stockMovements, ({ one }) => ({
+  item: one(stockItems, {
+    fields: [stockMovements.itemId],
+    references: [stockItems.id],
+  }),
+  staff: one(users, {
+    fields: [stockMovements.staffId],
     references: [users.id],
   }),
 }));

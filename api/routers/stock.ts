@@ -1,0 +1,344 @@
+import { z } from "zod";
+import { TRPCError } from "@trpc/server";
+import { and, desc, eq, gte, like, sql } from "drizzle-orm";
+import { createRouter } from "../middleware";
+import { authedProcedure, roleProcedure } from "../auth/guards";
+import { getDb } from "../queries/connection";
+import { stockItems, stockMovements, users } from "@db/schema";
+import { nairaToKobo } from "@contracts/money";
+import { toMilli } from "@contracts/stock";
+
+/**
+ * Stock (ingredients & supplies). Everyone can see levels and record
+ * restock/usage/waste — the kitchen needs that. Creating, editing,
+ * deactivating items and making ADJUSTMENTS (corrections) is manager+,
+ * because adjustments are the classic theft vector.
+ */
+export const stockRouter = createRouter({
+  list: authedProcedure
+    .input(
+      z.object({
+        search: z.string().trim().max(120).optional(),
+        lowOnly: z.boolean().default(false),
+        includeInactive: z.boolean().default(false),
+      }),
+    )
+    .query(async ({ input }) => {
+      const db = getDb();
+      const conditions = [];
+      if (input.search) conditions.push(like(stockItems.name, `%${input.search}%`));
+      if (!input.includeInactive) conditions.push(eq(stockItems.active, true));
+      if (input.lowOnly) {
+        conditions.push(
+          sql`${stockItems.lowStockAtMilli} IS NOT NULL AND ${stockItems.quantityMilli} <= ${stockItems.lowStockAtMilli}`,
+        );
+      }
+      const where = conditions.length ? and(...conditions) : undefined;
+
+      const rows = await db
+        .select()
+        .from(stockItems)
+        .where(where)
+        .orderBy(stockItems.name);
+
+      const [lastMoves, lowCountRows] = await Promise.all([
+        rows.length
+          ? db
+              .select({
+                itemId: stockMovements.itemId,
+                lastAt: sql<Date>`max(${stockMovements.createdAt})`,
+              })
+              .from(stockMovements)
+              .where(
+                inArrayIds(rows.map((r) => r.id)),
+              )
+              .groupBy(stockMovements.itemId)
+          : Promise.resolve([]),
+        db
+          .select({ n: sql<number>`count(*)` })
+          .from(stockItems)
+          .where(
+            and(
+              eq(stockItems.active, true),
+              sql`${stockItems.lowStockAtMilli} IS NOT NULL AND ${stockItems.quantityMilli} <= ${stockItems.lowStockAtMilli}`,
+            ),
+          ),
+      ]);
+      const lastByItem = new Map(
+        lastMoves.map((m) => [m.itemId, asUtcIso(m.lastAt)]),
+      );
+
+      return {
+        rows: rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          unit: r.unit,
+          quantityMilli: r.quantityMilli,
+          lowStockAtMilli: r.lowStockAtMilli,
+          costPerUnitKobo: r.costPerUnitKobo,
+          active: r.active,
+          low: r.lowStockAtMilli !== null && r.quantityMilli <= r.lowStockAtMilli,
+          lastMovementAt: lastByItem.get(r.id) ?? null,
+        })),
+        lowCount: Number(lowCountRows[0]?.n ?? 0),
+      };
+    }),
+
+  create: roleProcedure("manager")
+    .input(
+      z.object({
+        name: z.string().trim().min(2).max(120),
+        unit: z.string().trim().min(1).max(20),
+        /** Opening quantity in units (e.g. 25 for 25 kg). */
+        openingQuantity: z.number().min(0).max(1_000_000).default(0),
+        lowStockAt: z.number().min(0).max(1_000_000).nullish(),
+        /** Cost per unit in NAIRA, informational. */
+        costPerUnit: z.number().min(0).max(100_000_000).nullish(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db = getDb();
+      const openingMilli = toMilli(input.openingQuantity);
+      return await db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(stockItems)
+          .values({
+            name: input.name,
+            unit: input.unit,
+            quantityMilli: openingMilli,
+            lowStockAtMilli:
+              input.lowStockAt !== null && input.lowStockAt !== undefined
+                ? toMilli(input.lowStockAt)
+                : null,
+            costPerUnitKobo:
+              input.costPerUnit !== null && input.costPerUnit !== undefined
+                ? nairaToKobo(input.costPerUnit)
+                : null,
+            createdById: ctx.staff.sub,
+          })
+          .$returningId();
+        if (openingMilli > 0) {
+          await tx.insert(stockMovements).values({
+            itemId: row.id,
+            type: "adjustment",
+            deltaMilli: openingMilli,
+            balanceAfterMilli: openingMilli,
+            note: "Opening stock",
+            staffId: ctx.staff.sub,
+          });
+        }
+        return { ok: true as const, id: row.id };
+      });
+    }),
+
+  update: roleProcedure("manager")
+    .input(
+      z.object({
+        id: z.number().int().positive(),
+        name: z.string().trim().min(2).max(120).optional(),
+        unit: z.string().trim().min(1).max(20).optional(),
+        lowStockAt: z.number().min(0).max(1_000_000).nullish(),
+        costPerUnit: z.number().min(0).max(100_000_000).nullish(),
+        active: z.boolean().optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      const [result] = await db
+        .update(stockItems)
+        .set({
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.unit !== undefined ? { unit: input.unit } : {}),
+          ...(input.lowStockAt !== undefined
+            ? {
+                lowStockAtMilli:
+                  input.lowStockAt === null ? null : toMilli(input.lowStockAt),
+              }
+            : {}),
+          ...(input.costPerUnit !== undefined
+            ? {
+                costPerUnitKobo:
+                  input.costPerUnit === null ? null : nairaToKobo(input.costPerUnit),
+              }
+            : {}),
+          ...(input.active !== undefined ? { active: input.active } : {}),
+        })
+        .where(eq(stockItems.id, input.id));
+      if (result.affectedRows === 0) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Stock item not found" });
+      }
+      return { ok: true as const, id: input.id };
+    }),
+
+  /**
+   * Record a restock (+), usage (−) or waste (−). Outflows are a conditional
+   * UPDATE that can't take stock below zero — two people scooping the last
+   * of the rice at once get one success and one friendly error.
+   */
+  move: authedProcedure
+    .input(
+      z.object({
+        itemId: z.number().int().positive(),
+        type: z.enum(["restock", "usage", "waste"]),
+        /** Quantity in units, always positive — the sign comes from type. */
+        quantity: z.number().positive().max(1_000_000),
+        note: z.string().trim().max(255).optional(),
+        /** Restock only: total cost in NAIRA (informational). */
+        totalCost: z.number().positive().max(100_000_000).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db = getDb();
+      const deltaMilli =
+        input.type === "restock" ? toMilli(input.quantity) : -toMilli(input.quantity);
+      if (input.totalCost !== undefined && input.type !== "restock") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "A cost can only be attached to a restock",
+        });
+      }
+
+      const [item] = await db
+        .select()
+        .from(stockItems)
+        .where(eq(stockItems.id, input.itemId))
+        .limit(1);
+      if (!item) throw new TRPCError({ code: "NOT_FOUND", message: "Stock item not found" });
+      if (!item.active) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "That item is deactivated — a manager must reactivate it first",
+        });
+      }
+
+      return await db.transaction(async (tx) => {
+        const [updated] =
+          input.type === "restock"
+            ? await tx
+                .update(stockItems)
+                .set({
+                  quantityMilli: sql`quantity_milli + ${deltaMilli}`,
+                  // A priced restock refreshes the known unit cost.
+                  ...(input.totalCost !== undefined
+                    ? {
+                        costPerUnitKobo: Math.round(
+                          nairaToKobo(input.totalCost) / input.quantity,
+                        ),
+                      }
+                    : {}),
+                })
+                .where(eq(stockItems.id, input.itemId))
+            : await tx
+                .update(stockItems)
+                .set({ quantityMilli: sql`quantity_milli + ${deltaMilli}` })
+                .where(
+                  and(
+                    eq(stockItems.id, input.itemId),
+                    gte(stockItems.quantityMilli, -deltaMilli),
+                  ),
+                );
+        if (updated.affectedRows === 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Only ${(item.quantityMilli / 1000).toLocaleString("en-NG")} ${item.unit} of ${item.name} left — not enough for that`,
+          });
+        }
+        const balanceAfterMilli = item.quantityMilli + deltaMilli;
+        await tx.insert(stockMovements).values({
+          itemId: input.itemId,
+          type: input.type,
+          deltaMilli,
+          balanceAfterMilli,
+          totalCostKobo:
+            input.totalCost !== undefined ? nairaToKobo(input.totalCost) : null,
+          note: input.note || null,
+          staffId: ctx.staff.sub,
+        });
+        return { ok: true as const, itemId: input.itemId, balanceAfterMilli };
+      });
+    }),
+
+  /** Manager-only correction: set the exact counted quantity. */
+  adjust: roleProcedure("manager")
+    .input(
+      z.object({
+        itemId: z.number().int().positive(),
+        /** The true counted quantity in units. */
+        newQuantity: z.number().min(0).max(1_000_000),
+        note: z.string().trim().min(3).max(255),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db = getDb();
+      const newMilli = toMilli(input.newQuantity);
+      return await db.transaction(async (tx) => {
+        // Read BEFORE the update so the ledger records the true delta.
+        const [item] = await tx
+          .select()
+          .from(stockItems)
+          .where(eq(stockItems.id, input.itemId))
+          .limit(1);
+        if (!item) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Stock item not found" });
+        }
+        await tx
+          .update(stockItems)
+          .set({ quantityMilli: newMilli })
+          .where(eq(stockItems.id, input.itemId));
+        await tx.insert(stockMovements).values({
+          itemId: input.itemId,
+          type: "adjustment",
+          deltaMilli: newMilli - item.quantityMilli,
+          balanceAfterMilli: newMilli,
+          note: input.note,
+          staffId: ctx.staff.sub,
+        });
+        return { ok: true as const, itemId: input.itemId, balanceAfterMilli: newMilli };
+      });
+    }),
+
+  history: authedProcedure
+    .input(
+      z.object({
+        itemId: z.number().int().positive(),
+        limit: z.number().int().min(1).max(100).default(50),
+      }),
+    )
+    .query(async ({ input }) => {
+      const db = getDb();
+      const rows = await db
+        .select({
+          id: stockMovements.id,
+          type: stockMovements.type,
+          deltaMilli: stockMovements.deltaMilli,
+          balanceAfterMilli: stockMovements.balanceAfterMilli,
+          totalCostKobo: stockMovements.totalCostKobo,
+          note: stockMovements.note,
+          createdAt: stockMovements.createdAt,
+          staffName: users.name,
+        })
+        .from(stockMovements)
+        .innerJoin(users, eq(users.id, stockMovements.staffId))
+        .where(eq(stockMovements.itemId, input.itemId))
+        .orderBy(desc(stockMovements.createdAt), desc(stockMovements.id))
+        .limit(input.limit);
+      return rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
+    }),
+});
+
+/** Raw aggregates (max(created_at)) come back as timezone-less strings like
+ *  "2026-11-26 06:11:00" — they are UTC wall time, so pin the Z or Date
+ *  would parse them in the server's local zone and shift the result. */
+function asUtcIso(value: unknown): string {
+  const s = String(value);
+  const hasZone = s.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(s);
+  return new Date(hasZone ? s : `${s.replace(" ", "T")}Z`).toISOString();
+}
+
+/** inArray needs a non-empty tuple; callers guard rows.length above. */
+function inArrayIds(ids: number[]) {
+  return sql`${stockMovements.itemId} IN (${sql.join(
+    ids.map((id) => sql`${id}`),
+    sql`, `,
+  )})`;
+}

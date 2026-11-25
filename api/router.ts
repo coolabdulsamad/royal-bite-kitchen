@@ -6,6 +6,7 @@ import { ordersRouter } from "./routers/orders";
 import { partnersRouter } from "./routers/partners";
 import { salesRouter } from "./routers/sales";
 import { staffRouter } from "./routers/staff";
+import { stockRouter } from "./routers/stock";
 import { terminalsRouter } from "./routers/terminals";
 
 export const appRouter = createRouter({
@@ -18,6 +19,7 @@ export const appRouter = createRouter({
   sales: salesRouter,
   terminals: terminalsRouter,
   customers: customersRouter,
+  stock: stockRouter,
 });
 
 export type AppRouter = typeof appRouter;

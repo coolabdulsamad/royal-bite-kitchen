@@ -57,6 +57,13 @@
       "when": 1795643086796,
       "tag": "0007_outgoing_virginia_dare",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1795643960952,
+      "tag": "0008_parched_deathstrike",
+      "breakpoints": true
     }
   ]
 }

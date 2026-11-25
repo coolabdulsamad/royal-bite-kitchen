@@ -11,6 +11,7 @@ import SalesPage from "@/pages/Sales";
 import OrdersPage from "@/pages/Orders";
 import MoneyPage from "@/pages/Money";
 import CustomersPage from "@/pages/Customers";
+import StockPage from "@/pages/Stock";
 import { ReportsPage, SettingsPage } from "@/pages/placeholders";
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="/orders" element={<OrdersPage />} />
         <Route path="/sales" element={<SalesPage />} />
         <Route path="/customers" element={<CustomersPage />} />
+        <Route path="/stock" element={<StockPage />} />
         <Route path="/account" element={<AccountPage />} />
         <Route
           path="/menu"
