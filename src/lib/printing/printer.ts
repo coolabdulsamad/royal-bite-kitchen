@@ -11,8 +11,10 @@
  */
 import { useSyncExternalStore } from "react";
 import {
+  kitchenTicketToEscPos,
   receiptToEscPos,
   testTicketEscPos,
+  type KitchenTicketData,
   type ReceiptData,
 } from "./escpos";
 import {
@@ -194,6 +196,34 @@ class PrinterManager {
     }
     window.print();
     return "browser";
+  }
+
+  /**
+   * Kitchen ticket — direct thermal printers only. There's no on-screen paper
+   * layout for tickets, so with no direct printer this is a no-op ("skipped")
+   * rather than a confusing browser print of the whole page.
+   */
+  async printKitchenTicket(ticket: KitchenTicketData): Promise<"direct" | "skipped"> {
+    if (!this.printer) return "skipped";
+    this.busy = true;
+    this.lastError = null;
+    this.emit();
+    try {
+      const bytes = kitchenTicketToEscPos(ticket, {
+        width: this.settings.width,
+        asciiMoney: this.settings.asciiMoney,
+      });
+      await this.printer.write(bytes);
+      return "direct";
+    } catch (err) {
+      this.lastError =
+        err instanceof Error ? err.message : "Printing failed — check the printer.";
+      await this.disconnectDirect();
+      throw err instanceof Error ? err : new Error("Printing failed.");
+    } finally {
+      this.busy = false;
+      this.emit();
+    }
   }
 
   async printTestTicket(): Promise<"direct" | "browser"> {

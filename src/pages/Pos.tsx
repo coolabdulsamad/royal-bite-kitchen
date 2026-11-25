@@ -48,10 +48,53 @@ export default function PosPage() {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [receipt, setReceipt] = useState<CompletedSaleResult | null>(null);
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
+  const [orderHandoff, setOrderHandoff] = useState<{
+    orderId: number;
+    orderNo: string;
+    label: string;
+  } | null>(null);
   const [paymentProgress, setPaymentProgress] = useState<{
     paidKobo: number;
     payments: Array<{ label: string; amountKobo: number }>;
   } | null>(null);
+
+  // ── Order-payment handoff from the orders board (Pay button) ──
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("rbk.pos.payOrder");
+      if (!raw) return;
+      sessionStorage.removeItem("rbk.pos.payOrder");
+      const payload = JSON.parse(raw) as {
+        orderId: number;
+        orderNo: string;
+        label: string;
+        lines: Array<{
+          itemId: number;
+          itemName: string;
+          unitPriceKobo: number;
+          quantity: number;
+          modifiers: CartModifier[];
+        }>;
+      };
+      setCart(
+        payload.lines.map((l) => ({
+          key: makeCartKey(l.itemId, l.modifiers.map((m) => m.optionId)),
+          itemId: l.itemId,
+          name: l.itemName,
+          unitPriceKobo: l.unitPriceKobo,
+          modifiers: l.modifiers,
+          quantity: l.quantity,
+        })),
+      );
+      setOrderHandoff({
+        orderId: payload.orderId,
+        orderNo: payload.orderNo,
+        label: payload.label,
+      });
+    } catch {
+      // corrupted handoff — ignore and start a normal sale
+    }
+  }, []);
 
   // ── Customer display publisher ──
   const displayRef = useRef<ReturnType<typeof createDisplayPublisher> | null>(null);
@@ -181,6 +224,7 @@ export default function PosPage() {
     setCheckoutOpen(false);
     setMobileCartOpen(false);
     setPaymentProgress(null);
+    setOrderHandoff(null);
   }
 
   /**
@@ -195,6 +239,7 @@ export default function PosPage() {
       payments: input.payments,
       saleDate: input.saleDate,
       clientRef,
+      orderId: orderHandoff?.orderId,
     };
 
     if (isOnline()) {
@@ -325,6 +370,23 @@ export default function PosPage() {
             ))}
           </div>
         </div>
+
+        {/* Order-payment banner */}
+        {orderHandoff && (
+          <p className="flex items-center justify-between gap-3 border-b border-emerald-400/40 bg-emerald-400/10 px-4 py-2 text-xs text-emerald-300 sm:px-6">
+            <span>
+              Paying {orderHandoff.orderNo} — {orderHandoff.label}. Completing
+              this sale marks the order paid.
+            </span>
+            <button
+              type="button"
+              onClick={() => setOrderHandoff(null)}
+              className="shrink-0 underline decoration-dotted underline-offset-4 transition-colors hover:text-emerald-200"
+            >
+              Detach order
+            </button>
+          </p>
+        )}
 
         {/* Items grid */}
         <div className="royal-scroll min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">

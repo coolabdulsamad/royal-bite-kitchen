@@ -4,26 +4,16 @@ import { and, desc, eq, gte, inArray, like, lte, sql } from "drizzle-orm";
 import { createRouter } from "../middleware";
 import { authedProcedure, roleProcedure } from "../auth/guards";
 import { getDb } from "../queries/connection";
-import {
-  itemModifierGroups,
-  menuItems,
-  modifierGroups,
-  modifierOptions,
-  saleItems,
-  salePayments,
-  sales,
-  users,
-} from "@db/schema";
+import { orders, saleItems, salePayments, sales, users } from "@db/schema";
 import { nairaToKobo } from "@contracts/money";
 import { DISCOUNT_LIMIT_PERCENT } from "@contracts/payments";
 import { ROLE_LEVEL } from "@contracts/roles";
 import type { StaffRole } from "@contracts/roles";
+import { priceOrderLines, type ModifierSnapshot } from "../pricing";
+import { orderPaidGuard } from "./orders";
 
-interface ModifierSnapshot {
-  group: string;
-  option: string;
-  priceDeltaKobo: number;
-}
+/** Marker so the catch block can tell "order already closed" from DB failures. */
+class OrderClosedError extends Error {}
 
 /** Offline sales may be backdated this far without a manager role. */
 const OFFLINE_BACKDATE_LIMIT_MS = 72 * 60 * 60 * 1000;
@@ -68,6 +58,8 @@ export const salesRouter = createRouter({
         /** Idempotency key from the selling device — retries with the same
          *  ref return the already-saved sale instead of duplicating it. */
         clientRef: z.string().trim().min(8).max(64).optional(),
+        /** Paying a kitchen order: links it and marks it completed. */
+        orderId: z.number().int().positive().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -128,119 +120,8 @@ export const salesRouter = createRouter({
       const replayed = await replayExisting();
       if (replayed) return replayed;
 
-      // ---------------------------------------------------------- load menu
-      const itemIds = input.items.map((i) => i.itemId);
-      const dbItems = await db
-        .select()
-        .from(menuItems)
-        .where(inArray(menuItems.id, itemIds));
-      const links = await db
-        .select()
-        .from(itemModifierGroups)
-        .where(inArray(itemModifierGroups.itemId, itemIds));
-      const allOptionIds = input.items.flatMap((i) => i.optionIds);
-      const dbOptions =
-        allOptionIds.length > 0
-          ? await db
-              .select()
-              .from(modifierOptions)
-              .where(inArray(modifierOptions.id, allOptionIds))
-          : [];
-      const groupIds = Array.from(new Set(links.map((l) => l.groupId)));
-      const dbGroups =
-        groupIds.length > 0
-          ? await db
-              .select()
-              .from(modifierGroups)
-              .where(inArray(modifierGroups.id, groupIds))
-          : [];
-
-      // --------------------------------------------------- price the basket
-      let subtotalKobo = 0;
-      const pricedLines: Array<{
-        itemId: number;
-        itemName: string;
-        unitPriceKobo: number;
-        quantity: number;
-        modifiers: ModifierSnapshot[];
-        lineTotalKobo: number;
-      }> = [];
-
-      for (const cartLine of input.items) {
-        const item = dbItems.find((i) => i.id === cartLine.itemId);
-        if (!item) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "One of the items no longer exists — refresh the menu",
-          });
-        }
-        if (!item.available) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: `“${item.name}” is currently unavailable`,
-          });
-        }
-
-        const itemGroupIds = links
-          .filter((l) => l.itemId === item.id)
-          .map((l) => l.groupId);
-        const chosenOptions = dbOptions.filter((o) =>
-          cartLine.optionIds.includes(o.id),
-        );
-
-        // Every chosen option must belong to a group attached to this item.
-        for (const opt of chosenOptions) {
-          if (!itemGroupIds.includes(opt.groupId) || !opt.active) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: `Invalid modifier on “${item.name}”`,
-            });
-          }
-        }
-        // Single-select groups: at most one option.
-        const byGroup = new Map<number, number>();
-        for (const opt of chosenOptions) {
-          byGroup.set(opt.groupId, (byGroup.get(opt.groupId) ?? 0) + 1);
-        }
-        for (const [gid, count] of byGroup) {
-          const group = dbGroups.find((g) => g.id === gid);
-          if (group?.selectionType === "single" && count > 1) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: `“${group.name}” allows only one choice on “${item.name}”`,
-            });
-          }
-        }
-        // Required groups must be satisfied.
-        for (const gid of itemGroupIds) {
-          const group = dbGroups.find((g) => g.id === gid);
-          if (group?.required && !byGroup.has(gid)) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: `“${item.name}” needs a choice for “${group.name}”`,
-            });
-          }
-        }
-
-        const modifiers: ModifierSnapshot[] = chosenOptions.map((o) => ({
-          group: dbGroups.find((g) => g.id === o.groupId)?.name ?? "",
-          option: o.name,
-          priceDeltaKobo: o.priceDeltaKobo,
-        }));
-        const unitKobo =
-          item.priceKobo + chosenOptions.reduce((s, o) => s + o.priceDeltaKobo, 0);
-        const lineTotalKobo = unitKobo * cartLine.quantity;
-        subtotalKobo += lineTotalKobo;
-
-        pricedLines.push({
-          itemId: item.id,
-          itemName: item.name,
-          unitPriceKobo: item.priceKobo,
-          quantity: cartLine.quantity,
-          modifiers,
-          lineTotalKobo,
-        });
-      }
+      // -------------------------------------- price the basket (shared logic)
+      const { pricedLines, subtotalKobo } = await priceOrderLines(db, input.items);
 
       // ------------------------------------------------------------ discount
       let discountKobo = 0;
@@ -335,6 +216,29 @@ export const salesRouter = createRouter({
       }
 
       // ------------------------------------------------------------- persist
+      // Paying a kitchen order? Fail fast with a clear error before charging.
+      if (input.orderId !== undefined) {
+        const [ord] = await db
+          .select({ id: orders.id, status: orders.status, saleId: orders.saleId })
+          .from(orders)
+          .where(eq(orders.id, input.orderId))
+          .limit(1);
+        if (!ord) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Order not found" });
+        }
+        if (ord.status === "cancelled") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "That order was cancelled — it can't be paid",
+          });
+        }
+        if (ord.status === "completed" || ord.saleId !== null) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "That order was already paid — refresh the orders board",
+          });
+        }
+      }
       try {
         const result = await db.transaction(async (tx) => {
           const [saleRow] = await tx
@@ -375,6 +279,20 @@ export const salesRouter = createRouter({
               reference: p.reference || null,
             });
           }
+          // Kitchen order being paid: claim it atomically. If two tills race
+          // to pay the same order, exactly one wins — the loser's whole sale
+          // rolls back instead of double-charging the table.
+          if (input.orderId !== undefined) {
+            const [orderUpdate] = await tx
+              .update(orders)
+              .set({
+                status: "completed",
+                saleId: saleRow.id,
+                updatedAt: new Date(),
+              })
+              .where(and(eq(orders.id, input.orderId), orderPaidGuard));
+            if (orderUpdate.affectedRows === 0) throw new OrderClosedError();
+          }
           return { saleId: saleRow.id, receiptNo };
         });
 
@@ -400,6 +318,13 @@ export const salesRouter = createRouter({
         // return that sale instead of an error.
         const replayedAfterRace = await replayExisting().catch(() => null);
         if (replayedAfterRace) return replayedAfterRace;
+        if (err instanceof OrderClosedError) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              "That order was just paid or cancelled on another screen — nothing was charged",
+          });
+        }
         // Unique receipt race or DB failure — surface as a retryable error.
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",

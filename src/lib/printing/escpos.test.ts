@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { receiptToEscPos, testTicketEscPos, type ReceiptData } from "./escpos";
+import {
+  kitchenTicketToEscPos,
+  receiptToEscPos,
+  testTicketEscPos,
+  type KitchenTicketData,
+  type ReceiptData,
+} from "./escpos";
 
 const SALE: ReceiptData = {
   receiptNo: "RB-000042",
@@ -165,5 +171,66 @@ describe("testTicketEscPos", () => {
     for (const line of textLines(bytes)) {
       expect(line.length).toBeLessThanOrEqual(32);
     }
+  });
+});
+
+describe("kitchenTicketToEscPos", () => {
+  const TICKET: KitchenTicketData = {
+    orderNo: "ORD-000007",
+    label: "Table 4",
+    notes: "No pepper at all please",
+    staffName: "Demo Cashier",
+    placedAt: "2026-11-26T03:09:00.000Z",
+    lines: [
+      {
+        itemName: "Jollof Rice",
+        quantity: 2,
+        modifiers: [
+          { group: "Portion", option: "Large" },
+          { group: "Extras", option: "Fried plantain" },
+        ],
+      },
+      { itemName: "Peppered Chicken", quantity: 1, modifiers: [] },
+    ],
+  };
+
+  it("starts with the init command and ends with a cut", () => {
+    const bytes = kitchenTicketToEscPos(TICKET);
+    expect(bytes[0]).toBe(0x1b);
+    expect(bytes[1]).toBe(0x40);
+    const tail = Array.from(bytes.slice(-4));
+    expect(tail).toEqual([0x1d, 0x56, 0x42, 0x00]);
+  });
+
+  it("shows order number, table label and staff — no prices", () => {
+    const text = decode(kitchenTicketToEscPos(TICKET));
+    expect(text).toContain("KITCHEN TICKET");
+    expect(text).toContain("ORD-000007");
+    expect(text).toContain("Table 4");
+    expect(text).toContain("Taken by Demo Cashier");
+    expect(text).not.toContain("₦");
+    expect(text).not.toContain("NGN");
+  });
+
+  it("bolds quantities and lists modifiers without prices", () => {
+    const lines = textLines(kitchenTicketToEscPos(TICKET));
+    expect(lines).toContain("2x Jollof Rice");
+    expect(lines).toContain("1x Peppered Chicken");
+    expect(lines.some((l) => l.includes("Portion: Large"))).toBe(true);
+    expect(lines.some((l) => l.includes("Extras: Fried plantain"))).toBe(true);
+  });
+
+  it("prints the kitchen note, wrapped for narrow paper", () => {
+    const lines = textLines(kitchenTicketToEscPos(TICKET, { width: 32 }));
+    const note = lines.filter((l) => l.includes("NOTE") || l.includes("pepper"));
+    expect(note.length).toBeGreaterThan(0);
+    for (const l of lines) expect(l.length).toBeLessThanOrEqual(32);
+  });
+
+  it("omits the note section when there is none", () => {
+    const text = decode(
+      kitchenTicketToEscPos({ ...TICKET, notes: null }),
+    );
+    expect(text).not.toContain("NOTE:");
   });
 });

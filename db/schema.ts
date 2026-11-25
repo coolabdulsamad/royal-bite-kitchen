@@ -224,3 +224,78 @@ export const salePaymentsRelations = relations(salePayments, ({ one }) => ({
 export type Sale = typeof sales.$inferSelect;
 export type SaleItem = typeof saleItems.$inferSelect;
 export type SalePayment = typeof salePayments.$inferSelect;
+
+/**
+ * Kitchen orders — taken by waiters/cashiers before payment. The kitchen works
+ * the ticket (placed → preparing → ready → served); paying links the order to
+ * a sale (status completed). Prices are snapshotted at order time exactly like
+ * sale lines, but the payment re-prices the cart — this total is indicative.
+ */
+export const orders = mysqlTable("orders", {
+  id: serial("id").primaryKey(),
+  orderNo: varchar("order_no", { length: 20 }).notNull().unique(),
+  status: mysqlEnum("status", [
+    "placed",
+    "preparing",
+    "ready",
+    "served",
+    "completed",
+    "cancelled",
+  ])
+    .notNull()
+    .default("placed"),
+  /** Table number, customer name or pickup tag — kitchen needs to know. */
+  label: varchar("label", { length: 64 }).notNull(),
+  notes: varchar("notes", { length: 500 }),
+  staffId: bigint("staff_id", { mode: "number", unsigned: true })
+    .notNull()
+    .references(() => users.id),
+  /** Set when the order is paid — one order, at most one sale. */
+  saleId: bigint("sale_id", { mode: "number", unsigned: true }).references(
+    () => sales.id,
+  ),
+  totalKobo: int("total_kobo").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  /** Cancel metadata — set together (manager+ only). */
+  cancelledAt: timestamp("cancelled_at"),
+  cancelledById: bigint("cancelled_by_id", {
+    mode: "number",
+    unsigned: true,
+  }).references(() => users.id),
+  cancelReason: varchar("cancel_reason", { length: 255 }),
+});
+
+export const orderItems = mysqlTable("order_items", {
+  id: serial("id").primaryKey(),
+  orderId: bigint("order_id", { mode: "number", unsigned: true })
+    .notNull()
+    .references(() => orders.id),
+  /** Kept for analytics; nullable so deleting a menu item keeps history. */
+  itemId: bigint("item_id", { mode: "number", unsigned: true }).references(
+    () => menuItems.id,
+  ),
+  itemName: varchar("item_name", { length: 120 }).notNull(),
+  unitPriceKobo: int("unit_price_kobo").notNull(),
+  /** JSON snapshot: [{group, option, priceDeltaKobo}] */
+  modifiersJson: varchar("modifiers_json", { length: 2000 }),
+  quantity: int("quantity").notNull(),
+  lineTotalKobo: int("line_total_kobo").notNull(),
+});
+
+export const ordersRelations = relations(orders, ({ one, many }) => ({
+  staff: one(users, { fields: [orders.staffId], references: [users.id] }),
+  sale: one(sales, { fields: [orders.saleId], references: [sales.id] }),
+  items: many(orderItems),
+}));
+
+export const orderItemsRelations = relations(orderItems, ({ one }) => ({
+  order: one(orders, { fields: [orderItems.orderId], references: [orders.id] }),
+  item: one(menuItems, {
+    fields: [orderItems.itemId],
+    references: [menuItems.id],
+  }),
+}));
+
+export type Order = typeof orders.$inferSelect;
+export type OrderItem = typeof orderItems.$inferSelect;

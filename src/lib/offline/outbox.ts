@@ -30,6 +30,8 @@ export interface OfflineSalePayload {
   payments: Array<{ method: "cash" | "bank_pos" | "transfer"; amount: number; reference?: string }>;
   saleDate?: string;
   clientRef: string;
+  /** Set when paying a kitchen order — the sync marks it completed. */
+  orderId?: number;
 }
 
 interface OutboxState {

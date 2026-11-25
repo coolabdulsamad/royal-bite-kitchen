@@ -200,6 +200,71 @@ export function receiptToEscPos(
   return b.build();
 }
 
+/** What the encoder needs for a kitchen ticket — no money, just the work. */
+export interface KitchenTicketData {
+  orderNo: string;
+  /** Table / customer tag — printed biggest, it's what the kitchen shouts. */
+  label: string;
+  notes: string | null;
+  staffName: string;
+  /** ISO datetime the order was placed */
+  placedAt: string;
+  lines: Array<{
+    itemName: string;
+    quantity: number;
+    modifiers: Array<{ group: string; option: string }>;
+  }>;
+}
+
+/**
+ * Kitchen ticket — big order number and table, bold quantities, no prices.
+ * Printed when an order is placed (and re-printable from the orders board).
+ */
+export function kitchenTicketToEscPos(
+  ticket: KitchenTicketData,
+  options: EscPosOptions = {},
+): Uint8Array {
+  const width = options.width ?? 48;
+  const cut = options.cut ?? true;
+  const feedLines = options.feedLines ?? 4;
+
+  const b = new EscPosBuilder();
+  b.raw(...CMD_INIT).raw(...alignCmd(1));
+  b.center("ROYAL BITE KITCHEN", width);
+  b.raw(...boldCmd(true)).center("KITCHEN TICKET", width).raw(...boldCmd(false));
+  b.raw(...sizeCmd(true, true)).raw(...boldCmd(true));
+  b.center(ticket.orderNo, width / 2);
+  b.center(ticket.label, width / 2);
+  b.raw(...sizeCmd(false, false)).raw(...boldCmd(false));
+  b.center(formatReceiptDate(ticket.placedAt), width);
+  b.center(`Taken by ${ticket.staffName}`, width);
+  b.raw(...alignCmd(0)).separator(width);
+
+  for (const line of ticket.lines) {
+    b.raw(...boldCmd(true));
+    for (const chunk of wrapText(`${line.quantity}x ${line.itemName}`, width)) {
+      b.line(chunk);
+    }
+    b.raw(...boldCmd(false));
+    for (const m of line.modifiers) {
+      for (const chunk of wrapText(`  . ${m.group}: ${m.option}`, width)) {
+        b.line(chunk);
+      }
+    }
+  }
+
+  if (ticket.notes) {
+    b.separator(width);
+    b.raw(...boldCmd(true));
+    for (const chunk of wrapText(`NOTE: ${ticket.notes}`, width)) b.line(chunk);
+    b.raw(...boldCmd(false));
+  }
+  b.separator(width);
+  for (let i = 0; i < feedLines; i++) b.line();
+  if (cut) b.raw(...CUT_PARTIAL);
+  return b.build();
+}
+
 /** A small self-test ticket so users can verify a newly connected printer. */
 export function testTicketEscPos(options: EscPosOptions = {}): Uint8Array {
   const width = options.width ?? 48;
