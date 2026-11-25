@@ -20,6 +20,10 @@ export interface ReceiptData {
   subtotalKobo: number;
   discountKobo: number;
   totalKobo: number;
+  /** Attached customer (regulars / credit tabs). */
+  customerName?: string | null;
+  /** Amount left on the customer's credit tab by this sale. */
+  creditKobo?: number;
   payments: Array<{
     method: PaymentMethod;
     amountKobo: number;
@@ -167,6 +171,9 @@ export function receiptToEscPos(
   b.center(formatReceiptDate(sale.soldAt), width);
   b.raw(...boldCmd(true)).center(`Receipt ${sale.receiptNo}`, width).raw(...boldCmd(false));
   b.center(`Served by ${sale.cashierName}`, width);
+  if (sale.customerName) {
+    b.raw(...boldCmd(true)).center(`Customer: ${sale.customerName}`, width).raw(...boldCmd(false));
+  }
   b.raw(...alignCmd(0)).separator(width);
 
   // Items
@@ -195,6 +202,9 @@ export function receiptToEscPos(
       (p.terminalName ? ` · ${p.terminalName}` : "") +
       (p.reference ? ` (${p.reference})` : "");
     b.leftRight(label, money(p.amountKobo), width);
+  }
+  if ((sale.creditKobo ?? 0) > 0) {
+    b.raw(...boldCmd(true)).leftRight("ON CREDIT", money(sale.creditKobo ?? 0), width).raw(...boldCmd(false));
   }
   if (sale.changeKobo > 0) {
     b.raw(...boldCmd(true)).leftRight("Change", money(sale.changeKobo), width).raw(...boldCmd(false));

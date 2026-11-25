@@ -1,5 +1,6 @@
 import { createRouter, publicQuery } from "./middleware";
 import { authRouter } from "./routers/auth";
+import { customersRouter } from "./routers/customers";
 import { menuRouter } from "./routers/menu";
 import { ordersRouter } from "./routers/orders";
 import { partnersRouter } from "./routers/partners";
@@ -16,6 +17,7 @@ export const appRouter = createRouter({
   partners: partnersRouter,
   sales: salesRouter,
   terminals: terminalsRouter,
+  customers: customersRouter,
 });
 
 export type AppRouter = typeof appRouter;

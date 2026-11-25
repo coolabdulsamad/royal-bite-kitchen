@@ -253,6 +253,11 @@ export default function SalesPage() {
                           {PAYMENT_METHOD_LABEL[p.method as PaymentMethod]}
                         </span>
                       ))}
+                      {row.creditKobo > 0 && (
+                        <span className="rounded-full border border-amber-400/40 px-2 py-0.5 text-[10px] uppercase tracking-wide text-amber-400">
+                          Credit {formatNaira(row.creditKobo)}
+                        </span>
+                      )}
                     </span>
                   </td>
                   <td className="py-3 pr-3 text-right font-semibold text-royal-cream">
@@ -355,6 +360,8 @@ function SaleDetailModal({
         subtotalKobo: sale.subtotalKobo,
         discountKobo: sale.discountKobo,
         totalKobo: sale.totalKobo,
+        customerName: sale.customerName,
+        creditKobo: sale.creditKobo,
         payments: sale.payments,
         changeKobo: sale.changeKobo,
       }

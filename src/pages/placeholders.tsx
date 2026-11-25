@@ -20,16 +20,6 @@ export function SalesPage() {
   );
 }
 
-export function CustomersPage() {
-  return (
-    <SectionPlaceholder
-      title="Customers"
-      phase="Phase 2"
-      description="Customer profiles, credit balances and payment history — so regulars and owing customers are always one tap away."
-    />
-  );
-}
-
 export function ReportsPage() {
   return (
     <SectionPlaceholder

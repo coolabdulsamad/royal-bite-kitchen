@@ -143,6 +143,46 @@ export type ModifierGroup = typeof modifierGroups.$inferSelect;
 export type ModifierOption = typeof modifierOptions.$inferSelect;
 
 // ---------------------------------------------------------------------------
+// Customers — regulars + credit tabs. The balance is maintained
+// transactionally: credit sales raise it, repayments lower it, and
+// conditional UPDATEs keep it from ever going negative.
+// ---------------------------------------------------------------------------
+
+export const customers = mysqlTable("customers", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 120 }).notNull(),
+  /** Optional but unique when present — MySQL allows multiple NULLs. */
+  phone: varchar("phone", { length: 40 }).unique(),
+  notes: varchar("notes", { length: 255 }),
+  /** Outstanding credit in kobo (goods taken, not yet paid for). */
+  creditBalanceKobo: int("credit_balance_kobo").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+  createdById: bigint("created_by_id", { mode: "number", unsigned: true }).references(
+    () => users.id,
+  ),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/** A repayment against a customer's credit balance. */
+export const customerPayments = mysqlTable("customer_payments", {
+  id: serial("id").primaryKey(),
+  customerId: bigint("customer_id", { mode: "number", unsigned: true })
+    .notNull()
+    .references(() => customers.id),
+  amountKobo: int("amount_kobo").notNull(),
+  method: mysqlEnum("method", ["cash", "bank_pos", "transfer"]).notNull(),
+  reference: varchar("reference", { length: 120 }),
+  note: varchar("note", { length: 255 }),
+  receivedById: bigint("received_by_id", { mode: "number", unsigned: true })
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type Customer = typeof customers.$inferSelect;
+export type CustomerPayment = typeof customerPayments.$inferSelect;
+
+// ---------------------------------------------------------------------------
 // Sales — line prices/modifiers are SNAPSHOTS: editing the menu later never
 // rewrites history. Money stays in integer kobo.
 // ---------------------------------------------------------------------------
@@ -174,6 +214,13 @@ export const sales = mysqlTable("sales", {
     () => users.id,
   ),
   returnReason: varchar("return_reason", { length: 255 }),
+  /** Customer attached to this sale (regulars + credit tabs). */
+  customerId: bigint("customer_id", { mode: "number", unsigned: true }).references(
+    () => customers.id,
+  ),
+  /** Part of the total left unpaid on the customer's credit tab. Requires
+   *  customerId; 0 for fully-paid sales. */
+  creditKobo: int("credit_kobo").notNull().default(0),
 });
 
 export const saleItems = mysqlTable("sale_items", {
@@ -233,8 +280,28 @@ export const salePayments = mysqlTable("sale_payments", {
 
 export const salesRelations = relations(sales, ({ one, many }) => ({
   staff: one(users, { fields: [sales.staffId], references: [users.id] }),
+  customer: one(customers, {
+    fields: [sales.customerId],
+    references: [customers.id],
+  }),
   items: many(saleItems),
   payments: many(salePayments),
+}));
+
+export const customersRelations = relations(customers, ({ many }) => ({
+  payments: many(customerPayments),
+  sales: many(sales),
+}));
+
+export const customerPaymentsRelations = relations(customerPayments, ({ one }) => ({
+  customer: one(customers, {
+    fields: [customerPayments.customerId],
+    references: [customers.id],
+  }),
+  receivedBy: one(users, {
+    fields: [customerPayments.receivedById],
+    references: [users.id],
+  }),
 }));
 
 export const saleItemsRelations = relations(saleItems, ({ one }) => ({

@@ -20,6 +20,10 @@ export interface CompletedSaleResult {
   subtotalKobo: number;
   discountKobo: number;
   totalKobo: number;
+  /** Attached customer (regulars / credit tabs). */
+  customerName?: string | null;
+  /** Amount left on the customer's credit tab by this sale. */
+  creditKobo?: number;
   payments: Array<{
     method: PaymentMethod;
     amountKobo: number;
@@ -42,6 +46,8 @@ export interface CheckoutSubmitInput {
     terminalId?: number;
   }>;
   saleDate?: string;
+  /** Attach a customer — required when payments fall short (credit sale). */
+  customerId?: number;
 }
 
 interface PaymentRow {
@@ -97,6 +103,28 @@ export function CheckoutModal({
     refetchOnWindowFocus: false,
   });
   const terminals = terminalsQuery.data ?? [];
+
+  // Customers for credit tabs / regulars — online only: balances live on the
+  // server, so credit sales can't be queued offline.
+  const customersQuery = trpc.customers.list.useQuery(
+    { pageSize: 100 },
+    { retry: false, refetchOnWindowFocus: false, enabled: !offlineMode },
+  );
+  const customerRows = customersQuery.data?.rows ?? [];
+  const [customerId, setCustomerId] = useState<number | null>(null);
+  const [showNewCustomer, setShowNewCustomer] = useState(false);
+  const [newCustomerName, setNewCustomerName] = useState("");
+  const [newCustomerPhone, setNewCustomerPhone] = useState("");
+  const createCustomer = trpc.customers.create.useMutation({
+    onSuccess: (data) => {
+      setCustomerId(data.id);
+      setShowNewCustomer(false);
+      setNewCustomerName("");
+      setNewCustomerPhone("");
+      void customersQuery.refetch();
+    },
+    onError: (err) => setError(err.message),
+  });
 
   const canBackdate = offlineMode || (user ? roleAtLeast(user.role, "manager") : false);
 
@@ -166,6 +194,7 @@ export function CheckoutModal({
         discount: discount && discount.value > 0 ? discount : null,
         payments,
         saleDate: saleDate ? new Date(saleDate).toISOString() : undefined,
+        customerId: customerId ?? undefined,
       });
       onCompleted(sale);
     } catch (err) {
@@ -324,6 +353,87 @@ export function CheckoutModal({
             )}
           </div>
 
+          {/* Customer — optional for regulars; REQUIRED when paying short
+              (the rest goes on their credit tab). Online only. */}
+          {!offlineMode && (
+            <div className="mt-5">
+              <span className="text-[9px] uppercase tracking-[0.2em] text-royal-dim/70">
+                Customer{" "}
+                {remainingKobo > 0
+                  ? "— required, the rest goes on their credit"
+                  : "(optional)"}
+              </span>
+              <div className="mt-2 flex items-end gap-2">
+                <select
+                  value={customerId ?? ""}
+                  onChange={(e) =>
+                    setCustomerId(e.target.value ? Number(e.target.value) : null)
+                  }
+                  className={`${inputCls} bg-royal-bgsoft`}
+                >
+                  <option value="">— walk-in / no customer —</option>
+                  {customerRows.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                      {c.phone ? ` · ${c.phone}` : ""}
+                      {c.creditBalanceKobo > 0
+                        ? ` (owes ${formatNaira(c.creditBalanceKobo)})`
+                        : ""}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setShowNewCustomer((v) => !v)}
+                  className="shrink-0 rounded-full border border-royal-line px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-royal-accent transition-colors hover:border-royal-accent"
+                >
+                  New
+                </button>
+              </div>
+              {showNewCustomer && (
+                <div className="mt-3 border border-royal-line p-3">
+                  <input
+                    value={newCustomerName}
+                    onChange={(e) => setNewCustomerName(e.target.value)}
+                    placeholder="Customer name *"
+                    className={inputCls}
+                  />
+                  <input
+                    value={newCustomerPhone}
+                    onChange={(e) => setNewCustomerPhone(e.target.value)}
+                    placeholder="Phone (optional)"
+                    className={`${inputCls} mt-2`}
+                  />
+                  <button
+                    type="button"
+                    disabled={
+                      newCustomerName.trim().length < 2 || createCustomer.isPending
+                    }
+                    onClick={() =>
+                      createCustomer.mutate({
+                        name: newCustomerName.trim(),
+                        phone: newCustomerPhone.trim() || undefined,
+                      })
+                    }
+                    className="mt-3 flex items-center gap-2 rounded-full bg-royal-accent px-5 py-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-royal-bg disabled:opacity-50"
+                  >
+                    {createCustomer.isPending && (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    )}
+                    Add & select
+                  </button>
+                </div>
+              )}
+              {remainingKobo > 0 && customerId !== null && (
+                <p className="mt-2 border-l-2 border-amber-400/70 bg-amber-400/10 px-3 py-2 text-xs text-amber-300">
+                  {formatNaira(remainingKobo)} goes on{" "}
+                  {customerRows.find((c) => c.id === customerId)?.name ?? "the customer"}
+                  &apos;s credit tab
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Manual sale date — manager+ (or anyone while offline) */}
           {canBackdate && (
             <label className="mt-5 block">
@@ -349,7 +459,10 @@ export function CheckoutModal({
 
           <button
             type="button"
-            disabled={submitting || remainingKobo > 0}
+            disabled={
+              submitting ||
+              (remainingKobo > 0 && (offlineMode || customerId === null))
+            }
             onClick={() => void submit()}
             className="mt-6 flex w-full items-center justify-center gap-2 rounded-full border border-royal-accent py-3.5 text-sm font-semibold uppercase tracking-[0.2em] text-royal-accent transition-colors hover:bg-royal-accent hover:text-royal-bg disabled:cursor-not-allowed disabled:opacity-40"
           >
@@ -357,7 +470,11 @@ export function CheckoutModal({
             {submitting
               ? "Saving sale…"
               : remainingKobo > 0
-                ? `${formatNaira(remainingKobo)} still due`
+                ? offlineMode
+                  ? `${formatNaira(remainingKobo)} still due`
+                  : customerId === null
+                    ? `Pick a customer for the ${formatNaira(remainingKobo)} balance`
+                    : `Complete · ${formatNaira(remainingKobo)} on credit`
                 : "Complete sale"}
           </button>
         </div>

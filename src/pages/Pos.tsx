@@ -248,6 +248,7 @@ export default function PosPage() {
       saleDate: input.saleDate,
       clientRef,
       orderId: orderHandoff?.orderId,
+      customerId: input.customerId,
     };
 
     if (isOnline()) {

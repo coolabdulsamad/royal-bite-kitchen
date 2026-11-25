@@ -6,6 +6,7 @@ import { authedProcedure, roleProcedure } from "../auth/guards";
 import { getDb } from "../queries/connection";
 import {
   bankPosTerminals,
+  customers,
   orderItems,
   orders,
   saleItems,
@@ -72,6 +73,9 @@ export const salesRouter = createRouter({
         clientRef: z.string().trim().min(8).max(64).optional(),
         /** Paying a kitchen order: links it and marks it completed. */
         orderId: z.number().int().positive().optional(),
+        /** Attach a customer (regulars). REQUIRED when payments fall short —
+         *  the shortfall goes onto their credit tab. */
+        customerId: z.number().int().positive().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -111,6 +115,15 @@ export const salesRouter = createRouter({
           )
           .where(eq(salePayments.saleId, existing.id));
         const paidKobo = dbPayments.reduce((s, p) => s + p.amountKobo, 0);
+        let customerName: string | null = null;
+        if (existing.customerId) {
+          const [cust] = await db
+            .select({ name: customers.name })
+            .from(customers)
+            .where(eq(customers.id, existing.customerId))
+            .limit(1);
+          customerName = cust?.name ?? null;
+        }
         return {
           ok: true as const,
           saleId: existing.id,
@@ -130,6 +143,9 @@ export const salesRouter = createRouter({
           subtotalKobo: existing.subtotalKobo,
           discountKobo: existing.discountKobo,
           totalKobo: existing.totalKobo,
+          customerId: existing.customerId,
+          customerName,
+          creditKobo: existing.creditKobo,
           payments: dbPayments.map((p) => ({
             method: p.method,
             amountKobo: p.amountKobo,
@@ -282,7 +298,7 @@ export const salesRouter = createRouter({
           }
         }
       }
-      if (totalKobo > 0 && payments.length === 0) {
+      if (totalKobo > 0 && payments.length === 0 && input.customerId === undefined) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Add at least one payment",
@@ -298,13 +314,41 @@ export const salesRouter = createRouter({
         });
       }
       const paidKobo = payments.reduce((s, p) => s + p.amountKobo, 0);
-      if (paidKobo < totalKobo) {
+      // Short payments are only allowed as CREDIT on a registered customer's
+      // tab — the shortfall is tracked and collected later.
+      const shortfallKobo = totalKobo - paidKobo;
+      if (shortfallKobo > 0 && input.customerId === undefined) {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Payments do not cover the total",
+          message:
+            "Payments do not cover the total — collect the rest or put it on a customer's credit tab",
         });
       }
-      const changeKobo = paidKobo - totalKobo;
+      const creditKobo = Math.max(0, shortfallKobo);
+      let customerName: string | null = null;
+      if (input.customerId !== undefined) {
+        const [cust] = await db
+          .select({
+            id: customers.id,
+            name: customers.name,
+            active: customers.active,
+          })
+          .from(customers)
+          .where(eq(customers.id, input.customerId))
+          .limit(1);
+        if (!cust) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Customer not found" });
+        }
+        if (!cust.active) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              "That customer is deactivated — a manager must reactivate them first",
+          });
+        }
+        customerName = cust.name;
+      }
+      const changeKobo = Math.max(0, paidKobo - totalKobo);
 
       // --------------------------------------------------------- sale date
       let soldAt = new Date();
@@ -355,6 +399,8 @@ export const salesRouter = createRouter({
               totalKobo,
               soldAt,
               clientRef: input.clientRef ?? null,
+              customerId: input.customerId ?? null,
+              creditKobo,
             })
             .$returningId();
           const receiptNo = `RB-${String(saleRow.id).padStart(6, "0")}`;
@@ -384,6 +430,27 @@ export const salesRouter = createRouter({
               terminalId: p.terminalId ?? null,
             });
           }
+          // Credit sale: raise the customer's balance atomically with the
+          // sale itself. The active-guard catches a customer deactivated
+          // between checkout and save — the whole sale rolls back.
+          if (creditKobo > 0 && input.customerId !== undefined) {
+            const [custUpdate] = await tx
+              .update(customers)
+              .set({ creditBalanceKobo: sql`credit_balance_kobo + ${creditKobo}` })
+              .where(
+                and(
+                  eq(customers.id, input.customerId),
+                  eq(customers.active, true),
+                ),
+              );
+            if (custUpdate.affectedRows === 0) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message:
+                  "That customer was just deactivated — nothing was charged",
+              });
+            }
+          }
           // Kitchen order being paid: claim it atomically. If two tills race
           // to pay the same order, exactly one wins — the loser's whole sale
           // rolls back instead of double-charging the table.
@@ -411,6 +478,9 @@ export const salesRouter = createRouter({
           subtotalKobo,
           discountKobo,
           totalKobo,
+          customerId: input.customerId ?? null,
+          customerName,
+          creditKobo,
           payments: payments.map((p) => ({
             method: p.method,
             amountKobo: p.amountKobo,
@@ -435,6 +505,8 @@ export const salesRouter = createRouter({
               "That order was just paid or cancelled on another screen — nothing was charged",
           });
         }
+        // Friendly errors raised inside the transaction keep their message.
+        if (err instanceof TRPCError) throw err;
         // Unique receipt race or DB failure — surface as a retryable error.
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
@@ -508,9 +580,12 @@ export const salesRouter = createRouter({
           totalKobo: sales.totalKobo,
           status: sales.status,
           soldAt: sales.soldAt,
+          creditKobo: sales.creditKobo,
+          customerName: customers.name,
         })
         .from(sales)
         .leftJoin(users, eq(users.id, sales.staffId))
+        .leftJoin(customers, eq(customers.id, sales.customerId))
         .where(where)
         .orderBy(desc(sales.soldAt), desc(sales.id))
         .limit(input.pageSize)
@@ -602,6 +677,15 @@ export const salesRouter = createRouter({
           .limit(1);
         returnedByName = by?.name ?? null;
       }
+      let customerName: string | null = null;
+      if (sale.customerId) {
+        const [cust] = await db
+          .select({ name: customers.name })
+          .from(customers)
+          .where(eq(customers.id, sale.customerId))
+          .limit(1);
+        customerName = cust?.name ?? null;
+      }
 
       const paidKobo = payments.reduce((s, p) => s + p.amountKobo, 0);
       return {
@@ -624,6 +708,9 @@ export const salesRouter = createRouter({
         subtotalKobo: sale.subtotalKobo,
         discountKobo: sale.discountKobo,
         totalKobo: sale.totalKobo,
+        customerId: sale.customerId,
+        customerName,
+        creditKobo: sale.creditKobo,
         payments: payments.map((p) => ({
           method: p.method,
           amountKobo: p.amountKobo,
@@ -659,15 +746,27 @@ export const salesRouter = createRouter({
           message: "This sale was already returned",
         });
       }
-      await db
-        .update(sales)
-        .set({
-          status: "returned",
-          returnedAt: new Date(),
-          returnedById: ctx.staff.sub,
-          returnReason: input.reason,
-        })
-        .where(eq(sales.id, sale.id));
+      await db.transaction(async (tx) => {
+        await tx
+          .update(sales)
+          .set({
+            status: "returned",
+            returnedAt: new Date(),
+            returnedById: ctx.staff.sub,
+            returnReason: input.reason,
+          })
+          .where(eq(sales.id, sale.id));
+        // Returning a credit sale cancels the debt it created. Repayments
+        // aren't allocated per-sale, so the balance is simply floored at 0.
+        if (sale.creditKobo > 0 && sale.customerId) {
+          await tx
+            .update(customers)
+            .set({
+              creditBalanceKobo: sql`greatest(0, credit_balance_kobo - ${sale.creditKobo})`,
+            })
+            .where(eq(customers.id, sale.customerId));
+        }
+      });
       return { ok: true as const, saleId: sale.id, receiptNo: sale.receiptNo };
     }),
 });

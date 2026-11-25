@@ -50,6 +50,13 @@
       "when": 1795641882557,
       "tag": "0006_white_archangel",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1795643086796,
+      "tag": "0007_outgoing_virginia_dare",
+      "breakpoints": true
     }
   ]
 }

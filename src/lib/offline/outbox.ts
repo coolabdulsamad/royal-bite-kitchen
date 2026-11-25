@@ -37,6 +37,9 @@ export interface OfflineSalePayload {
   clientRef: string;
   /** Set when paying a kitchen order — the sync marks it completed. */
   orderId?: number;
+  /** Customer attached to the sale (credit sales are online-only, but a
+   *  fully-paid sale can still carry one through the queue). */
+  customerId?: number;
 }
 
 interface OutboxState {

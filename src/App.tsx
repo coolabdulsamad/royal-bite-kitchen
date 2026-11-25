@@ -10,11 +10,8 @@ import DisplayPage from "@/pages/Display";
 import SalesPage from "@/pages/Sales";
 import OrdersPage from "@/pages/Orders";
 import MoneyPage from "@/pages/Money";
-import {
-  CustomersPage,
-  ReportsPage,
-  SettingsPage,
-} from "@/pages/placeholders";
+import CustomersPage from "@/pages/Customers";
+import { ReportsPage, SettingsPage } from "@/pages/placeholders";
 
 export default function App() {
   return (

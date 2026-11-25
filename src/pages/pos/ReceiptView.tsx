@@ -41,6 +41,11 @@ export function ReceiptPaper({ sale }: { sale: CompletedSaleResult }) {
         <p className="text-[10px] text-neutral-500">
           Served by {sale.cashierName}
         </p>
+        {sale.customerName && (
+          <p className="text-[10px] font-semibold text-neutral-700">
+            Customer: {sale.customerName}
+          </p>
+        )}
       </div>
 
       <div className="my-2 border-t border-dashed border-neutral-400" />
@@ -99,6 +104,12 @@ export function ReceiptPaper({ sale }: { sale: CompletedSaleResult }) {
             <span>{formatNaira(p.amountKobo)}</span>
           </div>
         ))}
+        {(sale.creditKobo ?? 0) > 0 && (
+          <div className="flex justify-between font-semibold text-amber-700">
+            <span>ON CREDIT</span>
+            <span>{formatNaira(sale.creditKobo ?? 0)}</span>
+          </div>
+        )}
         {sale.changeKobo > 0 && (
           <div className="flex justify-between font-semibold">
             <span>Change</span>
