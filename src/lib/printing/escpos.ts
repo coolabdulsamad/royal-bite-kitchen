@@ -20,7 +20,13 @@ export interface ReceiptData {
   subtotalKobo: number;
   discountKobo: number;
   totalKobo: number;
-  payments: Array<{ method: PaymentMethod; amountKobo: number; reference: string | null }>;
+  payments: Array<{
+    method: PaymentMethod;
+    amountKobo: number;
+    reference: string | null;
+    /** Registered terminal name for bank_pos payments, when picked. */
+    terminalName?: string | null;
+  }>;
   changeKobo: number;
 }
 
@@ -184,7 +190,10 @@ export function receiptToEscPos(
 
   // Payments
   for (const p of sale.payments) {
-    const label = PAYMENT_METHOD_LABEL[p.method] + (p.reference ? ` (${p.reference})` : "");
+    const label =
+      PAYMENT_METHOD_LABEL[p.method] +
+      (p.terminalName ? ` · ${p.terminalName}` : "") +
+      (p.reference ? ` (${p.reference})` : "");
     b.leftRight(label, money(p.amountKobo), width);
   }
   if (sale.changeKobo > 0) {

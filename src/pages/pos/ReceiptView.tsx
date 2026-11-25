@@ -93,6 +93,7 @@ export function ReceiptPaper({ sale }: { sale: CompletedSaleResult }) {
           <div key={i} className="flex justify-between">
             <span>
               {PAYMENT_METHOD_LABEL[p.method]}
+              {p.terminalName ? ` · ${p.terminalName}` : ""}
               {p.reference ? ` (${p.reference})` : ""}
             </span>
             <span>{formatNaira(p.amountKobo)}</span>

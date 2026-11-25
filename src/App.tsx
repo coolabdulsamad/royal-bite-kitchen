@@ -9,9 +9,9 @@ import PosPage from "@/pages/Pos";
 import DisplayPage from "@/pages/Display";
 import SalesPage from "@/pages/Sales";
 import OrdersPage from "@/pages/Orders";
+import MoneyPage from "@/pages/Money";
 import {
   CustomersPage,
-  MoneyPage,
   ReportsPage,
   SettingsPage,
 } from "@/pages/placeholders";

@@ -4,7 +4,15 @@ import { and, desc, eq, gte, inArray, like, lte, sql } from "drizzle-orm";
 import { createRouter } from "../middleware";
 import { authedProcedure, roleProcedure } from "../auth/guards";
 import { getDb } from "../queries/connection";
-import { orderItems, orders, saleItems, salePayments, sales, users } from "@db/schema";
+import {
+  bankPosTerminals,
+  orderItems,
+  orders,
+  saleItems,
+  salePayments,
+  sales,
+  users,
+} from "@db/schema";
 import { nairaToKobo } from "@contracts/money";
 import { DISCOUNT_LIMIT_PERCENT } from "@contracts/payments";
 import { ROLE_LEVEL } from "@contracts/roles";
@@ -50,6 +58,8 @@ export const salesRouter = createRouter({
               /** Amount in NAIRA */
               amount: z.number().positive().max(100_000_000),
               reference: z.string().trim().max(120).optional(),
+              /** Registered bank POS terminal — only for bank_pos payments. */
+              terminalId: z.number().int().positive().optional(),
             }),
           )
           .max(6)
@@ -87,8 +97,18 @@ export const salesRouter = createRouter({
           .from(saleItems)
           .where(eq(saleItems.saleId, existing.id));
         const dbPayments = await db
-          .select()
+          .select({
+            method: salePayments.method,
+            amountKobo: salePayments.amountKobo,
+            reference: salePayments.reference,
+            terminalId: salePayments.terminalId,
+            terminalName: bankPosTerminals.name,
+          })
           .from(salePayments)
+          .leftJoin(
+            bankPosTerminals,
+            eq(bankPosTerminals.id, salePayments.terminalId),
+          )
           .where(eq(salePayments.saleId, existing.id));
         const paidKobo = dbPayments.reduce((s, p) => s + p.amountKobo, 0);
         return {
@@ -114,6 +134,8 @@ export const salesRouter = createRouter({
             method: p.method,
             amountKobo: p.amountKobo,
             reference: p.reference,
+            terminalId: p.terminalId,
+            terminalName: p.terminalName,
           })),
           changeKobo: Math.max(0, paidKobo - existing.totalKobo),
         };
@@ -221,6 +243,45 @@ export const salesRouter = createRouter({
         ...p,
         amountKobo: nairaToKobo(p.amount),
       }));
+      // A terminal pick is only meaningful on a card payment, and must point
+      // at a registered, active terminal (deactivated machines keep history
+      // but can't take new payments).
+      const terminalIds = [...new Set(payments.filter((p) => p.terminalId !== undefined).map((p) => p.terminalId!))];
+      const terminalNames = new Map<number, string>();
+      if (terminalIds.length > 0) {
+        for (const p of payments) {
+          if (p.terminalId !== undefined && p.method !== "bank_pos") {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "A terminal can only be attached to a bank POS payment",
+            });
+          }
+        }
+        const found = await db
+          .select({
+            id: bankPosTerminals.id,
+            name: bankPosTerminals.name,
+            active: bankPosTerminals.active,
+          })
+          .from(bankPosTerminals)
+          .where(inArray(bankPosTerminals.id, terminalIds));
+        const byId = new Map(found.map((t) => [t.id, t.active]));
+        for (const t of found) terminalNames.set(t.id, t.name);
+        for (const id of terminalIds) {
+          if (!byId.has(id)) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "That card terminal isn't registered — ask a manager",
+            });
+          }
+          if (!byId.get(id)) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "That card terminal is disabled — pick another one",
+            });
+          }
+        }
+      }
       if (totalKobo > 0 && payments.length === 0) {
         throw new TRPCError({
           code: "BAD_REQUEST",
@@ -320,6 +381,7 @@ export const salesRouter = createRouter({
               method: p.method,
               amountKobo: p.amountKobo,
               reference: p.reference || null,
+              terminalId: p.terminalId ?? null,
             });
           }
           // Kitchen order being paid: claim it atomically. If two tills race
@@ -353,6 +415,11 @@ export const salesRouter = createRouter({
             method: p.method,
             amountKobo: p.amountKobo,
             reference: p.reference ?? null,
+            terminalId: p.terminalId ?? null,
+            terminalName:
+              p.terminalId !== undefined
+                ? (terminalNames.get(p.terminalId) ?? null)
+                : null,
           })),
           changeKobo,
         };
@@ -513,8 +580,18 @@ export const salesRouter = createRouter({
         .from(saleItems)
         .where(eq(saleItems.saleId, sale.id));
       const payments = await db
-        .select()
+        .select({
+          method: salePayments.method,
+          amountKobo: salePayments.amountKobo,
+          reference: salePayments.reference,
+          terminalId: salePayments.terminalId,
+          terminalName: bankPosTerminals.name,
+        })
         .from(salePayments)
+        .leftJoin(
+          bankPosTerminals,
+          eq(bankPosTerminals.id, salePayments.terminalId),
+        )
         .where(eq(salePayments.saleId, sale.id));
       let returnedByName: string | null = null;
       if (sale.returnedById) {
@@ -551,6 +628,8 @@ export const salesRouter = createRouter({
           method: p.method,
           amountKobo: p.amountKobo,
           reference: p.reference,
+          terminalId: p.terminalId,
+          terminalName: p.terminalName,
         })),
         changeKobo: Math.max(0, paidKobo - sale.totalKobo),
       };

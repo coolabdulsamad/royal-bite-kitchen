@@ -31,8 +31,8 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Service",
     items: [
       { title: "New Sale", path: "/pos", icon: ShoppingCart, phase: "Live", minRole: "sales" },
-      { title: "Orders", path: "/orders", icon: ClipboardList, phase: "Phase 2", minRole: "sales" },
-      { title: "Sales History", path: "/sales", icon: History, phase: "Phase 1 · Step 9", minRole: "sales" },
+      { title: "Orders", path: "/orders", icon: ClipboardList, phase: "Live", minRole: "sales" },
+      { title: "Sales History", path: "/sales", icon: History, phase: "Live", minRole: "sales" },
     ],
   },
   {
@@ -40,7 +40,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { title: "Menu", path: "/menu", icon: BookOpen, phase: "Live", minRole: "manager" },
       { title: "Customers", path: "/customers", icon: Users, phase: "Phase 2", minRole: "sales" },
-      { title: "Money", path: "/money", icon: Wallet, phase: "Phase 3", minRole: "manager" },
+      { title: "Money", path: "/money", icon: Wallet, phase: "Live", minRole: "manager" },
       { title: "Staff", path: "/staff", icon: UserCog, phase: "Live", minRole: "admin" },
       { title: "Reports", path: "/reports", icon: BarChart3, phase: "Phase 3", minRole: "manager" },
     ],

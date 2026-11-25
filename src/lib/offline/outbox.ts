@@ -27,7 +27,12 @@ export interface OutboxEntry {
 export interface OfflineSalePayload {
   items: Array<{ itemId: number; quantity: number; optionIds: number[] }>;
   discount: { type: "percent" | "fixed"; value: number } | null;
-  payments: Array<{ method: "cash" | "bank_pos" | "transfer"; amount: number; reference?: string }>;
+  payments: Array<{
+    method: "cash" | "bank_pos" | "transfer";
+    amount: number;
+    reference?: string;
+    terminalId?: number;
+  }>;
   saleDate?: string;
   clientRef: string;
   /** Set when paying a kitchen order — the sync marks it completed. */

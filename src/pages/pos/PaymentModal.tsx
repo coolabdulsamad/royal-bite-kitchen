@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, Plus, Trash2, X } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { trpc } from "@/providers/trpc";
 import { formatNaira, nairaToKobo } from "@contracts/money";
 import { PAYMENT_METHOD_LABEL, type PaymentMethod } from "@contracts/payments";
 import { roleAtLeast } from "@contracts/roles";
@@ -19,7 +20,12 @@ export interface CompletedSaleResult {
   subtotalKobo: number;
   discountKobo: number;
   totalKobo: number;
-  payments: Array<{ method: PaymentMethod; amountKobo: number; reference: string | null }>;
+  payments: Array<{
+    method: PaymentMethod;
+    amountKobo: number;
+    reference: string | null;
+    terminalName?: string | null;
+  }>;
   changeKobo: number;
   /** True for a sale saved locally while offline (pending sync). */
   offline?: boolean;
@@ -29,7 +35,12 @@ export interface CompletedSaleResult {
 export interface CheckoutSubmitInput {
   items: Array<{ itemId: number; quantity: number; optionIds: number[] }>;
   discount: { type: "percent" | "fixed"; value: number } | null;
-  payments: Array<{ method: PaymentMethod; amount: number; reference?: string }>;
+  payments: Array<{
+    method: PaymentMethod;
+    amount: number;
+    reference?: string;
+    terminalId?: number;
+  }>;
   saleDate?: string;
 }
 
@@ -38,6 +49,8 @@ interface PaymentRow {
   /** naira string as typed */
   amount: string;
   reference: string;
+  /** Picked bank POS terminal (bank_pos rows only). */
+  terminalId: number | null;
 }
 
 const inputCls =
@@ -71,11 +84,19 @@ export function CheckoutModal({
 }) {
   const { user } = useAuth();
   const [rows, setRows] = useState<PaymentRow[]>([
-    { method: "cash", amount: (totalKobo / 100).toString(), reference: "" },
+    { method: "cash", amount: (totalKobo / 100).toString(), reference: "", terminalId: null },
   ]);
   const [saleDate, setSaleDate] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Registered card terminals for bank_pos rows (offline → no picker, the
+  // payment just goes through without one).
+  const terminalsQuery = trpc.terminals.list.useQuery(undefined, {
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const terminals = terminalsQuery.data ?? [];
 
   const canBackdate = offlineMode || (user ? roleAtLeast(user.role, "manager") : false);
 
@@ -117,6 +138,7 @@ export function CheckoutModal({
         method: "bank_pos",
         amount: remainingKobo > 0 ? (remainingKobo / 100).toString() : "",
         reference: "",
+        terminalId: null,
       },
     ]);
   }
@@ -128,6 +150,8 @@ export function CheckoutModal({
         method: r.method,
         amount: Number.parseFloat(r.amount),
         reference: r.reference || undefined,
+        terminalId:
+          r.method === "bank_pos" && r.terminalId !== null ? r.terminalId : undefined,
       }))
       .filter((p) => Number.isFinite(p.amount) && p.amount > 0);
 
@@ -188,7 +212,7 @@ export function CheckoutModal({
                       <button
                         key={method}
                         type="button"
-                        onClick={() => setRow(index, { method })}
+                        onClick={() => setRow(index, { method, terminalId: null })}
                         className={`flex-1 border px-2 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${
                           row.method === method
                             ? "border-royal-accent bg-royal-faint/40 text-royal-cream"
@@ -237,13 +261,37 @@ export function CheckoutModal({
                           setRow(index, { reference: e.target.value })
                         }
                         placeholder={
-                          row.method === "bank_pos" ? "Terminal ref" : "Transfer ref"
+                          row.method === "bank_pos" ? "Approval code" : "Transfer ref"
                         }
                         className={inputCls}
                       />
                     </label>
                   )}
                 </div>
+                {row.method === "bank_pos" && terminals.length > 0 && (
+                  <label className="mt-3 block">
+                    <span className="text-[9px] uppercase tracking-[0.2em] text-royal-dim/70">
+                      Terminal
+                    </span>
+                    <select
+                      value={row.terminalId ?? ""}
+                      onChange={(e) =>
+                        setRow(index, {
+                          terminalId: e.target.value ? Number(e.target.value) : null,
+                        })
+                      }
+                      className="w-full border-b border-royal-line bg-royal-bgsoft py-2 text-sm text-royal-cream focus:border-royal-accent focus:outline-none"
+                    >
+                      <option value="">— pick the terminal used —</option>
+                      {terminals.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                          {t.provider ? ` (${t.provider})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
               </div>
             ))}
           </div>

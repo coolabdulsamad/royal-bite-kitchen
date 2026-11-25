@@ -30,16 +30,6 @@ export function CustomersPage() {
   );
 }
 
-export function MoneyPage() {
-  return (
-    <SectionPlaceholder
-      title="Money"
-      phase="Phase 3"
-      description="Cash drawer sessions, expenses, money in and out, and end-of-day reconciliation so the books always balance."
-    />
-  );
-}
-
 export function ReportsPage() {
   return (
     <SectionPlaceholder

@@ -193,6 +193,29 @@ export const saleItems = mysqlTable("sale_items", {
   lineTotalKobo: int("line_total_kobo").notNull(),
 });
 
+/**
+ * Physical bank POS terminals (card machines) registered by a manager.
+ * Cashiers pick one on every bank_pos payment so card money can be
+ * reconciled per terminal at the end of the day.
+ */
+export const bankPosTerminals = mysqlTable("bank_pos_terminals", {
+  id: serial("id").primaryKey(),
+  /** Staff-facing name, e.g. "Counter 1 — Moniepoint". */
+  name: varchar("name", { length: 64 }).notNull(),
+  /** Bank / fintech provider (GTB, Moniepoint, OPay, …), informational. */
+  provider: varchar("provider", { length: 64 }),
+  /** The bank's own terminal ID (TID), informational. */
+  terminalCode: varchar("terminal_code", { length: 64 }),
+  active: boolean("active").notNull().default(true),
+  notes: varchar("notes", { length: 255 }),
+  createdById: bigint("created_by_id", { mode: "number", unsigned: true }).references(
+    () => users.id,
+  ),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type BankPosTerminal = typeof bankPosTerminals.$inferSelect;
+
 export const salePayments = mysqlTable("sale_payments", {
   id: serial("id").primaryKey(),
   saleId: bigint("sale_id", { mode: "number", unsigned: true })
@@ -201,6 +224,10 @@ export const salePayments = mysqlTable("sale_payments", {
   method: mysqlEnum("method", ["cash", "bank_pos", "transfer"]).notNull(),
   amountKobo: int("amount_kobo").notNull(),
   reference: varchar("reference", { length: 120 }),
+  /** Which physical terminal took a bank_pos payment (optional). */
+  terminalId: bigint("terminal_id", { mode: "number", unsigned: true }).references(
+    () => bankPosTerminals.id,
+  ),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -220,6 +247,10 @@ export const saleItemsRelations = relations(saleItems, ({ one }) => ({
 
 export const salePaymentsRelations = relations(salePayments, ({ one }) => ({
   sale: one(sales, { fields: [salePayments.saleId], references: [sales.id] }),
+  terminal: one(bankPosTerminals, {
+    fields: [salePayments.terminalId],
+    references: [bankPosTerminals.id],
+  }),
 }));
 
 export type Sale = typeof sales.$inferSelect;
