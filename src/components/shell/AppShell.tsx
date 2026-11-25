@@ -1,8 +1,10 @@
 import { useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router";
-import { Menu, X } from "lucide-react";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
+import { LogOut, Menu, X } from "lucide-react";
 import { trpc } from "@/providers/trpc";
-import { ALL_NAV_ITEMS, NAV_GROUPS } from "@/lib/nav";
+import { ALL_NAV_ITEMS, NAV_GROUPS, type NavItem } from "@/lib/nav";
+import { useAuth } from "@/lib/auth";
+import { ROLE_LABEL, roleAtLeast } from "@contracts/roles";
 
 function BrandBlock() {
   return (
@@ -25,9 +27,18 @@ function BrandBlock() {
 }
 
 function Nav({ onNavigate }: { onNavigate?: () => void }) {
+  const { user } = useAuth();
+
+  const visibleGroups = NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter(
+      (item: NavItem) => user && roleAtLeast(user.role, item.minRole),
+    ),
+  })).filter((group) => group.items.length > 0);
+
   return (
     <nav className="royal-scroll flex-1 overflow-y-auto py-4">
-      {NAV_GROUPS.map((group) => (
+      {visibleGroups.map((group) => (
         <div key={group.label} className="mb-5">
           <p className="mb-2 px-5 text-[10px] font-semibold uppercase tracking-[0.25em] text-royal-dim/70">
             {group.label}
@@ -59,8 +70,49 @@ function SidebarFooter() {
   return (
     <div className="border-t border-royal-line px-5 py-3">
       <p className="text-[10px] tracking-wide text-royal-dim/60">
-        v0.2 · Phase 1 — design system &amp; shell
+        v0.3 · Phase 1 — staff sign-in live
       </p>
+    </div>
+  );
+}
+
+function UserChip() {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  if (!user) return null;
+
+  return (
+    <div className="flex items-center gap-3">
+      <NavLink to="/account" className="group flex items-center gap-2.5">
+        <span className="flex h-8 w-8 items-center justify-center rounded-full border border-royal-line text-[11px] font-semibold text-royal-accent">
+          {user.name
+            .split(" ")
+            .map((part) => part[0])
+            .slice(0, 2)
+            .join("")
+            .toUpperCase()}
+        </span>
+        <span className="hidden text-left sm:block">
+          <span className="block text-xs leading-4 text-royal-cream transition-colors group-hover:text-royal-accent">
+            {user.name}
+          </span>
+          <span className="block text-[9px] uppercase tracking-[0.2em] text-royal-dim">
+            {ROLE_LABEL[user.role]} · {user.staffCode}
+          </span>
+        </span>
+      </NavLink>
+      <button
+        type="button"
+        aria-label="Sign out"
+        title="Sign out"
+        onClick={() => {
+          logout();
+          navigate("/login", { replace: true });
+        }}
+        className="p-2 text-royal-dim transition-colors hover:text-royal-accent"
+      >
+        <LogOut className="h-4 w-4" strokeWidth={1.75} />
+      </button>
     </div>
   );
 }
@@ -126,7 +178,7 @@ export function AppShell() {
           </h1>
 
           <div className="ml-auto flex items-center gap-4">
-            <span className="flex items-center gap-2 text-xs text-royal-dim">
+            <span className="hidden items-center gap-2 text-xs text-royal-dim md:flex">
               <span
                 className={`inline-block h-1.5 w-1.5 rounded-full ${
                   ping.isLoading
@@ -136,13 +188,9 @@ export function AppShell() {
                       : "bg-rose-500"
                 }`}
               />
-              <span className="hidden sm:inline">
-                {ping.isLoading ? "Connecting…" : apiOnline ? "API online" : "API offline"}
-              </span>
+              {ping.isLoading ? "Connecting…" : apiOnline ? "API online" : "API offline"}
             </span>
-            <span className="border border-royal-line px-2.5 py-1 text-[10px] uppercase tracking-[0.2em] text-royal-dim">
-              Preview
-            </span>
+            <UserChip />
           </div>
         </header>
 

@@ -1,22 +1,23 @@
 import {
-  mysqlTable,
+  boolean,
   mysqlEnum,
+  mysqlTable,
   serial,
-  varchar,
-  text,
   timestamp,
-  // bigint,
+  varchar,
 } from "drizzle-orm/mysql-core";
+import { STAFF_ROLES } from "../contracts/roles";
 
-// TODO: Add your tables here. See docs/Database.md for schema examples and patterns.
-//
-// Example:
-// export const posts = mysqlTable("posts", {
-//   id: serial("id").primaryKey(),
-//   title: varchar("title", { length: 255 }).notNull(),
-//   content: text("content"),
-//   createdAt: timestamp("created_at").notNull().defaultNow(),
-// });
-//
-// Note: FK columns referencing a serial() PK must use:
-//   bigint("columnName", { mode: "number", unsigned: true }).notNull()
+export const users = mysqlTable("users", {
+  id: serial("id").primaryKey(),
+  staffCode: varchar("staff_code", { length: 20 }).notNull().unique(),
+  name: varchar("name", { length: 120 }).notNull(),
+  username: varchar("username", { length: 60 }).notNull().unique(),
+  secretHash: varchar("secret_hash", { length: 120 }).notNull(),
+  role: mysqlEnum("role", STAFF_ROLES).notNull().default("sales"),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+});
+
+export type User = typeof users.$inferSelect;

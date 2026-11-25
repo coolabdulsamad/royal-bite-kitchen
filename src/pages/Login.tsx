@@ -1,15 +1,36 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
+import { Loader2 } from "lucide-react";
+import { trpc } from "@/providers/trpc";
+import { useAuth } from "@/lib/auth";
 
 export default function Login() {
   const navigate = useNavigate();
+  const { status, login } = useAuth();
   const [staffId, setStaffId] = useState("");
   const [pin, setPin] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const loginMutation = trpc.auth.login.useMutation();
+
+  // Already signed in → straight to the till.
+  useEffect(() => {
+    if (status === "authed") navigate("/pos", { replace: true });
+  }, [status, navigate]);
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    // Real authentication is wired in Phase 1 · Step 3.
-    navigate("/pos");
+    setError(null);
+    loginMutation.mutate(
+      { identifier: staffId, secret: pin },
+      {
+        onSuccess: (data) => {
+          login(data.token, data.user);
+          navigate("/pos", { replace: true });
+        },
+        onError: (err) => setError(err.message),
+      },
+    );
   }
 
   return (
@@ -55,7 +76,8 @@ export default function Login() {
               value={staffId}
               onChange={(event) => setStaffId(event.target.value)}
               autoComplete="username"
-              placeholder="e.g. RB-001"
+              placeholder="e.g. RB-101"
+              required
               className="mt-2 w-full border-b border-royal-line bg-transparent py-2.5 text-base text-royal-cream placeholder:text-royal-dim/50 transition-colors duration-150 focus:border-royal-accent focus:outline-none"
             />
           </label>
@@ -70,21 +92,32 @@ export default function Login() {
               onChange={(event) => setPin(event.target.value)}
               autoComplete="current-password"
               placeholder="••••••"
+              required
               className="mt-2 w-full border-b border-royal-line bg-transparent py-2.5 text-base text-royal-cream placeholder:text-royal-dim/50 transition-colors duration-150 focus:border-royal-accent focus:outline-none"
             />
           </label>
 
+          {error && (
+            <p className="mt-6 border-l-2 border-rose-500/70 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
+              {error}
+            </p>
+          )}
+
           <button
             type="submit"
-            className="mt-10 h-12 w-full rounded-full border border-royal-accent text-sm font-semibold uppercase tracking-[0.2em] text-royal-accent transition-colors duration-150 hover:bg-royal-accent hover:text-royal-bg"
+            disabled={loginMutation.isPending}
+            className="mt-10 flex h-12 w-full items-center justify-center gap-2 rounded-full border border-royal-accent text-sm font-semibold uppercase tracking-[0.2em] text-royal-accent transition-colors duration-150 hover:bg-royal-accent hover:text-royal-bg disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Enter
+            {loginMutation.isPending && (
+              <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.75} />
+            )}
+            {loginMutation.isPending ? "Signing in…" : "Enter"}
           </button>
 
           <p className="mt-6 text-center text-[11px] leading-5 text-royal-dim/80">
-            Preview build — real authentication connects in Step 3.
+            Staff accounts are created by a manager or admin.
             <br />
-            Press Enter to explore the app shell.
+            Forgotten your PIN? Ask an admin to reset it from the Staff page.
           </p>
         </form>
       </div>

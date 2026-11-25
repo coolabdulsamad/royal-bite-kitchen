@@ -60,16 +60,6 @@ export function MoneyPage() {
   );
 }
 
-export function StaffPage() {
-  return (
-    <SectionPlaceholder
-      title="Staff"
-      phase="Phase 3"
-      description="Staff accounts, role permissions, attendance clock-in and clock-out, and a full audit trail of sensitive actions."
-    />
-  );
-}
-
 export function ReportsPage() {
   return (
     <SectionPlaceholder
