@@ -7,9 +7,9 @@ import AccountPage from "@/pages/Account";
 import MenuPage from "@/pages/Menu";
 import PosPage from "@/pages/Pos";
 import DisplayPage from "@/pages/Display";
+import SalesPage from "@/pages/Sales";
 import {
   OrdersPage,
-  SalesPage,
   CustomersPage,
   MoneyPage,
   ReportsPage,

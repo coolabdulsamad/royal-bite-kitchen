@@ -167,6 +167,12 @@ export const sales = mysqlTable("sales", {
   /** Business date of the sale — usually now, but manager+ can backdate. */
   soldAt: timestamp("sold_at").notNull().defaultNow(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  /** Return metadata — set together when a finished sale is returned (manager+). */
+  returnedAt: timestamp("returned_at"),
+  returnedById: bigint("returned_by_id", { mode: "number", unsigned: true }).references(
+    () => users.id,
+  ),
+  returnReason: varchar("return_reason", { length: 255 }),
 });
 
 export const saleItems = mysqlTable("sale_items", {

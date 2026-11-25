@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { eq, inArray } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, like, lte, sql } from "drizzle-orm";
 import { createRouter } from "../middleware";
-import { authedProcedure } from "../auth/guards";
+import { authedProcedure, roleProcedure } from "../auth/guards";
 import { getDb } from "../queries/connection";
 import {
   itemModifierGroups,
@@ -408,5 +408,219 @@ export const salesRouter = createRouter({
           cause: err,
         });
       }
+    }),
+
+  // ---------------------------------------------------------------------------
+  // Sales history — cashiers see their own sales, manager+ sees everything
+  // ---------------------------------------------------------------------------
+
+  salesHistory: authedProcedure
+    .input(
+      z.object({
+        /** Inclusive ISO bounds on sold_at */
+        from: z.string().datetime().optional(),
+        to: z.string().datetime().optional(),
+        /** Receipt number fragment, e.g. "000042" or "RB-000042" */
+        receipt: z.string().trim().max(20).optional(),
+        /** Manager+ only — non-managers are always scoped to themselves */
+        staffId: z.number().int().positive().optional(),
+        status: z.enum(["completed", "returned", "all"]).default("all"),
+        method: z.enum(["cash", "bank_pos", "transfer"]).optional(),
+        page: z.number().int().min(0).default(0),
+        pageSize: z.number().int().min(1).max(100).default(25),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const db = getDb();
+      const staffRole = ctx.staff.role as StaffRole;
+      const isManager = ROLE_LEVEL[staffRole] >= ROLE_LEVEL.manager;
+
+      const conditions = [];
+      if (!isManager || input.staffId) {
+        conditions.push(eq(sales.staffId, isManager ? input.staffId! : ctx.staff.sub));
+      }
+      if (input.from) conditions.push(gte(sales.soldAt, new Date(input.from)));
+      if (input.to) conditions.push(lte(sales.soldAt, new Date(input.to)));
+      if (input.receipt) conditions.push(like(sales.receiptNo, `%${input.receipt}%`));
+      if (input.status !== "all") conditions.push(eq(sales.status, input.status));
+      if (input.method) {
+        conditions.push(
+          inArray(
+            sales.id,
+            db
+              .select({ id: salePayments.saleId })
+              .from(salePayments)
+              .where(eq(salePayments.method, input.method)),
+          ),
+        );
+      }
+      const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const [countRow] = await db
+        .select({ n: sql<number>`count(*)` })
+        .from(sales)
+        .where(where);
+      const total = countRow?.n ?? 0;
+
+      const rows = await db
+        .select({
+          id: sales.id,
+          receiptNo: sales.receiptNo,
+          staffId: sales.staffId,
+          staffName: users.name,
+          subtotalKobo: sales.subtotalKobo,
+          discountKobo: sales.discountKobo,
+          totalKobo: sales.totalKobo,
+          status: sales.status,
+          soldAt: sales.soldAt,
+        })
+        .from(sales)
+        .leftJoin(users, eq(users.id, sales.staffId))
+        .where(where)
+        .orderBy(desc(sales.soldAt), desc(sales.id))
+        .limit(input.pageSize)
+        .offset(input.page * input.pageSize);
+
+      const ids = rows.map((r) => r.id);
+      const pagePayments = ids.length
+        ? await db
+            .select()
+            .from(salePayments)
+            .where(inArray(salePayments.saleId, ids))
+        : [];
+      const pageItems = ids.length
+        ? await db
+            .select({ saleId: saleItems.saleId, quantity: saleItems.quantity })
+            .from(saleItems)
+            .where(inArray(saleItems.saleId, ids))
+        : [];
+
+      return {
+        total,
+        page: input.page,
+        pageSize: input.pageSize,
+        rows: rows.map((r) => ({
+          ...r,
+          soldAt: r.soldAt.toISOString(),
+          itemCount: pageItems
+            .filter((i) => i.saleId === r.id)
+            .reduce((s, i) => s + i.quantity, 0),
+          payments: pagePayments
+            .filter((p) => p.saleId === r.id)
+            .map((p) => ({ method: p.method, amountKobo: p.amountKobo })),
+        })),
+      };
+    }),
+
+  /** One sale with lines + payments (+ return info). Cashiers: own sales only. */
+  saleDetail: authedProcedure
+    .input(z.object({ saleId: z.number().int().positive() }))
+    .query(async ({ ctx, input }) => {
+      const db = getDb();
+      const staffRole = ctx.staff.role as StaffRole;
+      const isManager = ROLE_LEVEL[staffRole] >= ROLE_LEVEL.manager;
+
+      const [sale] = await db
+        .select()
+        .from(sales)
+        .where(eq(sales.id, input.saleId))
+        .limit(1);
+      if (!sale) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Sale not found" });
+      }
+      if (!isManager && sale.staffId !== ctx.staff.sub) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "You can only view your own sales",
+        });
+      }
+
+      const [cashier] = await db
+        .select({ name: users.name })
+        .from(users)
+        .where(eq(users.id, sale.staffId))
+        .limit(1);
+      const lines = await db
+        .select()
+        .from(saleItems)
+        .where(eq(saleItems.saleId, sale.id));
+      const payments = await db
+        .select()
+        .from(salePayments)
+        .where(eq(salePayments.saleId, sale.id));
+      let returnedByName: string | null = null;
+      if (sale.returnedById) {
+        const [by] = await db
+          .select({ name: users.name })
+          .from(users)
+          .where(eq(users.id, sale.returnedById))
+          .limit(1);
+        returnedByName = by?.name ?? null;
+      }
+
+      const paidKobo = payments.reduce((s, p) => s + p.amountKobo, 0);
+      return {
+        saleId: sale.id,
+        receiptNo: sale.receiptNo,
+        cashierName: cashier?.name ?? "Staff",
+        soldAt: sale.soldAt.toISOString(),
+        status: sale.status,
+        returnedAt: sale.returnedAt ? sale.returnedAt.toISOString() : null,
+        returnedByName,
+        returnReason: sale.returnReason,
+        lines: lines.map((l) => ({
+          itemName: l.itemName,
+          quantity: l.quantity,
+          modifiers: l.modifiersJson
+            ? (JSON.parse(l.modifiersJson) as ModifierSnapshot[])
+            : [],
+          lineTotalKobo: l.lineTotalKobo,
+        })),
+        subtotalKobo: sale.subtotalKobo,
+        discountKobo: sale.discountKobo,
+        totalKobo: sale.totalKobo,
+        payments: payments.map((p) => ({
+          method: p.method,
+          amountKobo: p.amountKobo,
+          reference: p.reference,
+        })),
+        changeKobo: Math.max(0, paidKobo - sale.totalKobo),
+      };
+    }),
+
+  /** Return a finished sale — manager and above only. */
+  returnSale: roleProcedure("manager")
+    .input(
+      z.object({
+        saleId: z.number().int().positive(),
+        reason: z.string().trim().min(3).max(255),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const db = getDb();
+      const [sale] = await db
+        .select()
+        .from(sales)
+        .where(eq(sales.id, input.saleId))
+        .limit(1);
+      if (!sale) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Sale not found" });
+      }
+      if (sale.status === "returned") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "This sale was already returned",
+        });
+      }
+      await db
+        .update(sales)
+        .set({
+          status: "returned",
+          returnedAt: new Date(),
+          returnedById: ctx.staff.sub,
+          returnReason: input.reason,
+        })
+        .where(eq(sales.id, sale.id));
+      return { ok: true as const, saleId: sale.id, receiptNo: sale.receiptNo };
     }),
 });

@@ -63,6 +63,16 @@ export const staffRouter = createRouter({
     manageableRoles(ctx.staff.role),
   ),
 
+  /** id + name of all staff — manager+ (for filters like Sales History). */
+  names: roleProcedure("manager").query(async () => {
+    const db = getDb();
+    const rows = await db
+      .select({ id: users.id, name: users.name })
+      .from(users)
+      .orderBy(asc(users.name));
+    return rows;
+  }),
+
   create: adminProcedure
     .input(
       z.object({
