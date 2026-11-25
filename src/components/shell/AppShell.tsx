@@ -2,6 +2,7 @@ import { useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { LogOut, Menu, X } from "lucide-react";
 import { trpc } from "@/providers/trpc";
+import { PrinterMenu } from "@/components/PrinterMenu";
 import { ALL_NAV_ITEMS, NAV_GROUPS, type NavItem } from "@/lib/nav";
 import { useAuth } from "@/lib/auth";
 import { ROLE_LABEL, roleAtLeast } from "@contracts/roles";
@@ -70,7 +71,7 @@ function SidebarFooter() {
   return (
     <div className="border-t border-royal-line px-5 py-3">
       <p className="text-[10px] tracking-wide text-royal-dim/60">
-        v0.3 · Phase 1 — staff sign-in live
+        v0.6 · Phase 1 — POS + printing live
       </p>
     </div>
   );
@@ -178,6 +179,7 @@ export function AppShell() {
           </h1>
 
           <div className="ml-auto flex items-center gap-4">
+            <PrinterMenu />
             <span className="hidden items-center gap-2 text-xs text-royal-dim md:flex">
               <span
                 className={`inline-block h-1.5 w-1.5 rounded-full ${

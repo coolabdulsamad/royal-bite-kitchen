@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Minus, Plus, Search, ShoppingCart, Trash2, X } from "lucide-react";
 import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/lib/auth";
+import { printerManager, usePrinter } from "@/lib/printing/printer";
 import { formatNaira } from "@contracts/money";
 import { DISCOUNT_LIMIT_PERCENT } from "@contracts/payments";
 import {
@@ -21,6 +22,7 @@ import { ReceiptView } from "./pos/ReceiptView";
 
 export default function PosPage() {
   const { user } = useAuth();
+  const { settings: printerSettings } = usePrinter();
   const menuQuery = trpc.menu.fullMenu.useQuery();
 
   const [activeCategory, setActiveCategory] = useState<number | null>(null);
@@ -115,6 +117,10 @@ export default function PosPage() {
     setCheckoutOpen(false);
     setMobileCartOpen(false);
     setReceipt(sale);
+    if (printerSettings.autoPrint) {
+      // fire-and-forget — the receipt modal offers a retry if this fails
+      printerManager.printReceipt(sale).catch(() => {});
+    }
   }
 
   const cartPanel = (

@@ -1,6 +1,8 @@
-import { Printer, Plus, X } from "lucide-react";
+import { useState } from "react";
+import { Loader2, Printer, Plus, X } from "lucide-react";
 import { formatNaira } from "@contracts/money";
 import { PAYMENT_METHOD_LABEL } from "@contracts/payments";
+import { printerManager } from "@/lib/printing/printer";
 import type { CompletedSaleResult } from "./PaymentModal";
 
 const STORE_NAME = "Royal Bite Kitchen";
@@ -116,6 +118,23 @@ export function ReceiptView({
   onNewSale: () => void;
   onClose: () => void;
 }) {
+  const [printing, setPrinting] = useState(false);
+  const [printError, setPrintError] = useState<string | null>(null);
+
+  async function handlePrint() {
+    setPrinting(true);
+    setPrintError(null);
+    try {
+      await printerManager.printReceipt(sale);
+    } catch (err) {
+      setPrintError(
+        err instanceof Error ? err.message : "Printing failed — check the printer.",
+      );
+    } finally {
+      setPrinting(false);
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
@@ -145,14 +164,25 @@ export function ReceiptView({
           </div>
         </div>
 
-        <div className="flex gap-3 border-t border-royal-line px-5 py-4">
+        <div className="border-t border-royal-line px-5 py-4">
+          {printError && (
+            <p className="mb-3 border-l-2 border-rose-500/70 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+              {printError} — you can try again.
+            </p>
+          )}
+          <div className="flex gap-3">
           <button
             type="button"
-            onClick={() => window.print()}
-            className="flex flex-1 items-center justify-center gap-2 rounded-full border border-royal-accent py-3 text-xs font-semibold uppercase tracking-[0.18em] text-royal-accent transition-colors hover:bg-royal-accent hover:text-royal-bg"
+            disabled={printing}
+            onClick={handlePrint}
+            className="flex flex-1 items-center justify-center gap-2 rounded-full border border-royal-accent py-3 text-xs font-semibold uppercase tracking-[0.18em] text-royal-accent transition-colors hover:bg-royal-accent hover:text-royal-bg disabled:opacity-50"
           >
-            <Printer className="h-4 w-4" strokeWidth={1.75} />
-            Print receipt
+            {printing ? (
+              <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.75} />
+            ) : (
+              <Printer className="h-4 w-4" strokeWidth={1.75} />
+            )}
+            {printing ? "Printing…" : "Print receipt"}
           </button>
           <button
             type="button"
@@ -162,6 +192,7 @@ export function ReceiptView({
             <Plus className="h-4 w-4" strokeWidth={1.75} />
             New sale
           </button>
+          </div>
         </div>
       </div>
     </div>
