@@ -73,3 +73,13 @@
     @apply bg-background text-foreground;
   }
 }
+/* Royal Bite Kitchen brand base */
+body {
+  background-color: #150a26;
+  color: #f2effa;
+}
+
+::selection {
+  background-color: #9333ea;
+  color: #f2effa;
+}
