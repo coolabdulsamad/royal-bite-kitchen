@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
-import { Loader2 } from "lucide-react";
+import { Loader2, Server } from "lucide-react";
 import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/lib/auth";
+import { getServerUrl, isNativeApp, saveServerUrl } from "@/lib/apiAuth";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -10,6 +11,9 @@ export default function Login() {
   const [staffId, setStaffId] = useState("");
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const nativeApp = isNativeApp();
+  const [serverUrl, setServerUrl] = useState(getServerUrl());
+  const [serverOpen, setServerOpen] = useState(nativeApp && !getServerUrl());
 
   const loginMutation = trpc.auth.login.useMutation();
 
@@ -21,6 +25,15 @@ export default function Login() {
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
+    if (nativeApp) {
+      const clean = serverUrl.trim();
+      if (!clean) {
+        setError("Enter the server address first (the link where the app is published).");
+        setServerOpen(true);
+        return;
+      }
+      saveServerUrl(/^https?:\/\//i.test(clean) ? clean : `https://${clean}`);
+    }
     loginMutation.mutate(
       { identifier: staffId, secret: pin },
       {
@@ -96,6 +109,43 @@ export default function Login() {
               className="mt-2 w-full border-b border-royal-line bg-transparent py-2.5 text-base text-royal-cream placeholder:text-royal-dim/50 transition-colors duration-150 focus:border-royal-accent focus:outline-none"
             />
           </label>
+
+          {nativeApp && (
+            <div className="mt-8">
+              <button
+                type="button"
+                onClick={() => setServerOpen((o) => !o)}
+                className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-royal-dim transition-colors hover:text-royal-accent"
+              >
+                <Server className="h-3.5 w-3.5" strokeWidth={1.75} />
+                Server {serverUrl ? `· ${serverUrl.replace(/^https?:\/\//, "")}` : "(not set)"}
+              </button>
+              {serverOpen && (
+                <label className="mt-3 block">
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.25em] text-royal-dim">
+                    Server address
+                  </span>
+                  <input
+                    type="text"
+                    value={serverUrl}
+                    onChange={(event) => {
+                      setServerUrl(event.target.value);
+                      saveServerUrl(
+                        /^https?:\/\//i.test(event.target.value.trim())
+                          ? event.target.value.trim()
+                          : `https://${event.target.value.trim()}`,
+                      );
+                    }}
+                    placeholder="https://your-published-app-link"
+                    className="mt-2 w-full border-b border-royal-line bg-transparent py-2.5 text-base text-royal-cream placeholder:text-royal-dim/50 transition-colors duration-150 focus:border-royal-accent focus:outline-none"
+                  />
+                  <span className="mt-1 block text-[10px] text-royal-dim/70">
+                    The link where Royal Bite is published — enter it once, it stays on this device.
+                  </span>
+                </label>
+              )}
+            </div>
+          )}
 
           {error && (
             <p className="mt-6 border-l-2 border-rose-500/70 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">

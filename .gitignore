@@ -39,3 +39,9 @@ build/
 # Test coverage
 coverage/
 .nyc_output/
+
+# Capacitor / Android build outputs
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties

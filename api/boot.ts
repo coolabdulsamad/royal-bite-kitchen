@@ -49,6 +49,39 @@ app.use("*", async (c, next) => {
   });
 });
 
+// CORS for the Capacitor Android shell: its WebView origin is https://localhost
+// (or capacitor://localhost on older runtimes), so API calls from the APK are
+// cross-origin. Same-origin web traffic is untouched — headers are only added
+// when one of these exact origins asks. Set AFTER next() because the tRPC
+// route hands back a raw Response (same reason as the request-id header above).
+const NATIVE_APP_ORIGINS = new Set([
+  "https://localhost",
+  "capacitor://localhost",
+  "http://localhost",
+]);
+app.use("/api/*", async (c, next) => {
+  const origin = c.req.header("origin");
+  const allowed = origin && NATIVE_APP_ORIGINS.has(origin) ? origin : null;
+  if (c.req.method === "OPTIONS") {
+    if (!allowed) return c.body(null, 204);
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": allowed,
+        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        "Access-Control-Allow-Headers": "authorization,content-type",
+        "Access-Control-Allow-Credentials": "true",
+        "Access-Control-Max-Age": "86400",
+      },
+    });
+  }
+  await next();
+  if (allowed) {
+    c.res.headers.set("Access-Control-Allow-Origin", allowed);
+    c.res.headers.set("Access-Control-Allow-Credentials", "true");
+  }
+});
+
 // Scoped to the tRPC route, NOT global: on the dev server (@hono/vite-dev-server)
 // a global bodyLimit breaks bodyless requests. Hono's bodyLimit reads any truthy
 // request stream to the end and then rebuilds the Request with `new Request(raw,

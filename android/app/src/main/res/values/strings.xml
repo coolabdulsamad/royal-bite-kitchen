@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Royal Bite Kitchen</string>
+    <string name="title_activity_main">Royal Bite Kitchen</string>
+    <string name="package_name">app.royalbitekitchen.pos</string>
+    <string name="custom_url_scheme">app.royalbitekitchen.pos</string>
+</resources>
