@@ -30,16 +30,6 @@ export function SalesPage() {
   );
 }
 
-export function MenuPage() {
-  return (
-    <SectionPlaceholder
-      title="Menu"
-      phase="Phase 1 · Step 4"
-      description="Categories, items, prices, modifiers like sizes and extras, photos and availability — managed by the manager role and above."
-    />
-  );
-}
-
 export function CustomersPage() {
   return (
     <SectionPlaceholder

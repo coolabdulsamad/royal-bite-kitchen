@@ -38,7 +38,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Management",
     items: [
-      { title: "Menu", path: "/menu", icon: BookOpen, phase: "Phase 1 · Step 4", minRole: "manager" },
+      { title: "Menu", path: "/menu", icon: BookOpen, phase: "Live", minRole: "manager" },
       { title: "Customers", path: "/customers", icon: Users, phase: "Phase 2", minRole: "sales" },
       { title: "Money", path: "/money", icon: Wallet, phase: "Phase 3", minRole: "manager" },
       { title: "Staff", path: "/staff", icon: UserCog, phase: "Live", minRole: "admin" },

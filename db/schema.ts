@@ -1,5 +1,8 @@
+import { relations } from "drizzle-orm";
 import {
+  bigint,
   boolean,
+  int,
   mysqlEnum,
   mysqlTable,
   serial,
@@ -7,6 +10,10 @@ import {
   varchar,
 } from "drizzle-orm/mysql-core";
 import { STAFF_ROLES } from "../contracts/roles";
+
+// ---------------------------------------------------------------------------
+// Staff
+// ---------------------------------------------------------------------------
 
 export const users = mysqlTable("users", {
   id: serial("id").primaryKey(),
@@ -21,3 +28,115 @@ export const users = mysqlTable("users", {
 });
 
 export type User = typeof users.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// Menu
+// Money is stored as integer KOBO (₦1 = 100 kobo) so totals are always exact.
+// ---------------------------------------------------------------------------
+
+export const categories = mysqlTable("categories", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 80 }).notNull(),
+  sortOrder: int("sort_order").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const menuItems = mysqlTable("menu_items", {
+  id: serial("id").primaryKey(),
+  categoryId: bigint("category_id", { mode: "number", unsigned: true })
+    .notNull()
+    .references(() => categories.id),
+  name: varchar("name", { length: 120 }).notNull(),
+  description: varchar("description", { length: 500 }),
+  priceKobo: int("price_kobo").notNull(),
+  available: boolean("available").notNull().default(true),
+  sortOrder: int("sort_order").notNull().default(0),
+  imageUrl: varchar("image_url", { length: 500 }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow().onUpdateNow(),
+});
+
+export const modifierGroups = mysqlTable("modifier_groups", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 80 }).notNull(),
+  selectionType: mysqlEnum("selection_type", ["single", "multi"])
+    .notNull()
+    .default("single"),
+  required: boolean("required").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const modifierOptions = mysqlTable("modifier_options", {
+  id: serial("id").primaryKey(),
+  groupId: bigint("group_id", { mode: "number", unsigned: true })
+    .notNull()
+    .references(() => modifierGroups.id),
+  name: varchar("name", { length: 80 }).notNull(),
+  priceDeltaKobo: int("price_delta_kobo").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+});
+
+export const itemModifierGroups = mysqlTable("item_modifier_groups", {
+  id: serial("id").primaryKey(),
+  itemId: bigint("item_id", { mode: "number", unsigned: true })
+    .notNull()
+    .references(() => menuItems.id),
+  groupId: bigint("group_id", { mode: "number", unsigned: true })
+    .notNull()
+    .references(() => modifierGroups.id),
+  sortOrder: int("sort_order").notNull().default(0),
+});
+
+// ---------------------------------------------------------------------------
+// Relations (powers the db.query.* relational API)
+// ---------------------------------------------------------------------------
+
+export const categoriesRelations = relations(categories, ({ many }) => ({
+  items: many(menuItems),
+}));
+
+export const menuItemsRelations = relations(menuItems, ({ one, many }) => ({
+  category: one(categories, {
+    fields: [menuItems.categoryId],
+    references: [categories.id],
+  }),
+  modifierLinks: many(itemModifierGroups),
+}));
+
+export const modifierGroupsRelations = relations(
+  modifierGroups,
+  ({ many }) => ({
+    options: many(modifierOptions),
+    itemLinks: many(itemModifierGroups),
+  }),
+);
+
+export const modifierOptionsRelations = relations(
+  modifierOptions,
+  ({ one }) => ({
+    group: one(modifierGroups, {
+      fields: [modifierOptions.groupId],
+      references: [modifierGroups.id],
+    }),
+  }),
+);
+
+export const itemModifierGroupsRelations = relations(
+  itemModifierGroups,
+  ({ one }) => ({
+    item: one(menuItems, {
+      fields: [itemModifierGroups.itemId],
+      references: [menuItems.id],
+    }),
+    group: one(modifierGroups, {
+      fields: [itemModifierGroups.groupId],
+      references: [modifierGroups.id],
+    }),
+  }),
+);
+
+export type Category = typeof categories.$inferSelect;
+export type MenuItem = typeof menuItems.$inferSelect;
+export type ModifierGroup = typeof modifierGroups.$inferSelect;
+export type ModifierOption = typeof modifierOptions.$inferSelect;

@@ -4,11 +4,11 @@ import { RequireAuth } from "@/components/shell/RequireAuth";
 import Login from "@/pages/Login";
 import StaffPage from "@/pages/Staff";
 import AccountPage from "@/pages/Account";
+import MenuPage from "@/pages/Menu";
 import {
   PosPage,
   OrdersPage,
   SalesPage,
-  MenuPage,
   CustomersPage,
   MoneyPage,
   ReportsPage,
