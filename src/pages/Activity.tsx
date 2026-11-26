@@ -14,6 +14,8 @@ const ACTION_LABEL: Record<string, string> = {
   "sale.return": "Sale returned",
   "expense.create": "Expense recorded",
   "expense.void": "Expense voided",
+  "expense.approve": "Expense approved",
+  "expense.reject": "Expense rejected",
   "drawer.count": "Drawer counted",
   "stock.create": "Stock item added",
   "stock.update": "Stock item updated",

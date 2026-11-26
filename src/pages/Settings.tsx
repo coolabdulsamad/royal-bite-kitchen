@@ -5,10 +5,18 @@ import {
   Landmark,
   Loader2,
   ScrollText,
+  ShieldCheck,
   UserCog,
 } from "lucide-react";
 import { trpc } from "@/providers/trpc";
-import { DEFAULT_SETTINGS, type BusinessSettings } from "@contracts/settings";
+import {
+  DEFAULT_SETTINGS,
+  type BusinessSettings,
+} from "@contracts/settings";
+import type { ExpenseApprovalPolicy } from "@contracts/money";
+import { useAuth } from "@/lib/auth";
+
+type SettingsData = BusinessSettings & { expenseApproval: ExpenseApprovalPolicy };
 
 const inputCls =
   "mt-2 w-full border-b border-royal-line bg-transparent py-2.5 text-sm text-royal-cream placeholder:text-royal-dim/50 transition-colors focus:border-royal-accent focus:outline-none";
@@ -88,6 +96,99 @@ const SHORTCUTS = [
   },
 ];
 
+/** Superadmin-only: the expense approval workflow rules. */
+function ExpenseApprovalSection({ initial }: { initial: ExpenseApprovalPolicy }) {
+  const utils = trpc.useUtils();
+  const [required, setRequired] = useState(initial.required);
+  const [threshold, setThreshold] = useState(
+    initial.thresholdKobo > 0 ? String(initial.thresholdKobo / 100) : "",
+  );
+  const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  const save = trpc.settings.updateExpenseApproval.useMutation({
+    onSuccess: (policy) => {
+      utils.settings.get.setData(undefined, (prev) =>
+        prev ? { ...prev, expenseApproval: policy } : prev,
+      );
+      void utils.money.expenses.list.invalidate();
+      void utils.money.expenses.pendingQueue.invalidate();
+      setNotice({ kind: "ok", text: "Approval rules saved — they apply to new expenses immediately." });
+    },
+    onError: (err) => setNotice({ kind: "err", text: err.message }),
+  });
+
+  function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setNotice(null);
+    save.mutate({ required, thresholdNaira: Number(threshold) || 0 });
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="mt-12 border border-royal-line p-6"
+      data-testid="expense-approval-section"
+    >
+      <p className={`${sectionTitle} flex items-center gap-2`}>
+        <ShieldCheck className="h-3.5 w-3.5" /> Expense approvals · super admin only
+      </p>
+      <p className="mt-3 max-w-2xl text-sm leading-6 text-royal-dim">
+        When approval is on, expenses recorded by staff without the approval
+        grant start as <span className="text-amber-300">pending</span> — they do
+        not touch the cash drawer or reports until an approver signs them off on
+        the Money page. You choose who may approve on the{" "}
+        <NavLink to="/permissions" className="text-royal-accent underline underline-offset-2">
+          Permissions page
+        </NavLink>{" "}
+        (Expense approvals row). Your own and admin expenses approve instantly.
+      </p>
+      <label className="mt-6 flex cursor-pointer items-center gap-3">
+        <input
+          data-testid="approval-required"
+          type="checkbox"
+          className="h-4 w-4 accent-[#9333EA]"
+          checked={required}
+          onChange={(e) => setRequired(e.target.checked)}
+        />
+        <span className="text-sm text-royal-cream">
+          Require approval before an expense counts
+        </span>
+      </label>
+      <label className="mt-6 block max-w-xs">
+        <span className={labelCls}>Auto-approve below (₦)</span>
+        <input
+          data-testid="approval-threshold"
+          className={inputCls}
+          value={threshold}
+          onChange={(e) => setThreshold(e.target.value.replace(/[^0-9.]/g, ""))}
+          placeholder="0"
+          inputMode="decimal"
+        />
+        <span className="mt-1 block text-xs text-royal-dim/70">
+          0 or empty = every expense needs sign-off.
+        </span>
+      </label>
+      {notice && (
+        <p
+          data-testid="approval-notice"
+          className={`mt-5 text-sm ${notice.kind === "ok" ? "text-emerald-400" : "text-red-400"}`}
+        >
+          {notice.text}
+        </p>
+      )}
+      <button
+        data-testid="approval-save"
+        type="submit"
+        disabled={save.isPending}
+        className="mt-5 flex items-center gap-2 bg-royal-primary px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-royal-accent disabled:opacity-50"
+      >
+        {save.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+        Save approval rules
+      </button>
+    </form>
+  );
+}
+
 export default function SettingsPage() {
   const settingsQuery = trpc.settings.get.useQuery();
 
@@ -104,11 +205,16 @@ export default function SettingsPage() {
   return <SettingsForm initial={settingsQuery.data} />;
 }
 
-function SettingsForm({ initial }: { initial: BusinessSettings }) {
+function SettingsForm({ initial }: { initial: SettingsData }) {
+  const { user } = useAuth();
   const utils = trpc.useUtils();
   const updateMutation = trpc.settings.update.useMutation({
     onSuccess: (data) => {
-      utils.settings.get.setData(undefined, data);
+      // settings.update returns only the business fields — merge so the
+      // expenseApproval policy already in the cache is preserved.
+      utils.settings.get.setData(undefined, (prev) =>
+        prev ? { ...prev, ...data } : { ...data, expenseApproval: initial.expenseApproval },
+      );
       setNotice({ kind: "ok", text: "Settings saved. New receipts will use them right away." });
     },
     onError: (err) => setNotice({ kind: "err", text: err.message }),
@@ -243,6 +349,11 @@ function SettingsForm({ initial }: { initial: BusinessSettings }) {
           </p>
         </div>
       </form>
+
+      {/* expense approval rules — superadmin only */}
+      {user?.role === "superadmin" && (
+        <ExpenseApprovalSection initial={initial.expenseApproval} />
+      )}
 
       {/* management shortcuts */}
       <p className={`${sectionTitle} mt-12`}>More to manage</p>

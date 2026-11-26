@@ -10,6 +10,7 @@ import {
   PowerOff,
   Receipt,
   Scale,
+  ShieldCheck,
   Wallet,
   XCircle,
 } from "lucide-react";
@@ -276,9 +277,13 @@ function ExpensesSection({ canManage }: { canManage: boolean }) {
   }
 
   const createMutation = trpc.money.expenses.create.useMutation({
-    onSuccess: () => {
+    onSuccess: (r) => {
       refresh();
-      setNotice("Expense recorded.");
+      setNotice(
+        r.status === "pending"
+          ? "Expense recorded — waiting for approval before it counts."
+          : "Expense recorded.",
+      );
       setError(null);
       setShowForm(false);
       setAmount("");
@@ -465,6 +470,22 @@ function ExpensesSection({ canManage }: { canManage: boolean }) {
                     <span className="ml-2 border border-royal-line px-2 py-0.5 text-[9px] uppercase tracking-[0.2em] text-royal-dim">
                       {e.method.replace("_", " ")}
                     </span>
+                    {e.status === "pending" && (
+                      <span
+                        className="ml-2 border border-amber-400/40 px-2 py-0.5 text-[9px] uppercase tracking-[0.2em] text-amber-300"
+                        data-testid={`expense-pending-${e.expenseId}`}
+                      >
+                        Pending approval
+                      </span>
+                    )}
+                    {e.status === "rejected" && (
+                      <span
+                        className="ml-2 border border-red-400/40 px-2 py-0.5 text-[9px] uppercase tracking-[0.2em] text-red-300"
+                        data-testid={`expense-rejected-${e.expenseId}`}
+                      >
+                        Rejected
+                      </span>
+                    )}
                     {e.voidedAt && (
                       <span className="ml-2 border border-red-400/40 px-2 py-0.5 text-[9px] uppercase tracking-[0.2em] text-red-300">
                         voided
@@ -473,13 +494,15 @@ function ExpensesSection({ canManage }: { canManage: boolean }) {
                   </p>
                   <p className="mt-1 truncate text-xs text-royal-dim">
                     {new Date(e.expenseAt).toLocaleString()} · by {e.staffName ?? "—"}
+                    {e.status === "rejected" &&
+                      ` · rejected by ${e.decidedByName ?? "—"}: ${e.rejectReason ?? "no reason given"}`}
                     {e.voidedAt && ` · voided by ${e.voidedByName ?? "—"}: ${e.voidReason}`}
                   </p>
                 </div>
-                <p className={`text-sm font-bold ${e.voidedAt ? "text-royal-dim line-through" : "text-royal-accent"}`}>
+                <p className={`text-sm font-bold ${e.voidedAt || e.status !== "approved" ? "text-royal-dim" : "text-royal-accent"}`}>
                   {formatNaira(e.amountKobo)}
                 </p>
-                {canManage && !e.voidedAt && (
+                {canManage && !e.voidedAt && e.status === "approved" && (
                   <button
                     type="button"
                     onClick={() => {
@@ -520,6 +543,176 @@ function ExpensesSection({ canManage }: { canManage: boolean }) {
                   >
                     {voidMutation.isPending && <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2} />}
                     Confirm void
+                  </button>
+                </form>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Expense approvals (approvers only — expenseApprovals: manage)
+// ---------------------------------------------------------------------------
+
+function ExpenseApprovalsSection() {
+  const utils = trpc.useUtils();
+  const queue = trpc.money.expenses.pendingQueue.useQuery();
+
+  const [rejectingId, setRejectingId] = useState<number | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // Cancel-then-invalidate — see ExpensesSection.refresh for why a plain
+  // invalidate can silently join the page's in-flight mount batch instead of
+  // starting a fresh fetch. Approving/rejecting changes the queue, the
+  // expense list and the drawer summary all at once.
+  async function refresh() {
+    await Promise.all([
+      utils.money.expenses.pendingQueue.cancel(),
+      utils.money.expenses.list.cancel(),
+      utils.money.drawer.summary.cancel(),
+    ]);
+    utils.money.expenses.pendingQueue.invalidate();
+    utils.money.expenses.list.invalidate();
+    utils.money.drawer.summary.invalidate();
+  }
+
+  const approveMutation = trpc.money.expenses.approve.useMutation({
+    onSuccess: () => {
+      refresh();
+      setNotice("Expense approved — it now counts against the drawer and reports.");
+      setError(null);
+    },
+    onError: (err) => setError(err.message),
+  });
+  const rejectMutation = trpc.money.expenses.reject.useMutation({
+    onSuccess: () => {
+      refresh();
+      setNotice("Expense rejected — it will never count.");
+      setRejectingId(null);
+      setRejectReason("");
+      setError(null);
+    },
+    onError: (err) => setError(err.message),
+  });
+
+  const pending = queue.data?.pending ?? [];
+
+  return (
+    <section className="border border-royal-line bg-royal-panel p-6" data-testid="approvals-section">
+      <div className="flex items-start justify-between gap-4">
+        <p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.3em] text-royal-accent">
+          <ShieldCheck className="h-4 w-4" strokeWidth={2} />
+          Expense approvals
+        </p>
+        {pending.length > 0 && (
+          <span
+            className="shrink-0 border border-amber-400/40 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-amber-300"
+            data-testid="approvals-count"
+          >
+            {pending.length} waiting
+          </span>
+        )}
+      </div>
+      <p className="mt-2 max-w-lg text-sm leading-6 text-royal-dim">
+        Expenses waiting for sign-off. Approved expenses count against the
+        drawer and reports; rejected ones never do.
+      </p>
+
+      {notice && (
+        <div className="mt-4 flex items-center gap-2 border border-royal-line bg-royal-bg px-4 py-3 text-sm text-royal-cream">
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-royal-accent" strokeWidth={2} />
+          {notice}
+        </div>
+      )}
+      {error && (
+        <p className="mt-4 flex items-center gap-2 text-sm text-red-300" data-testid="approvals-error">
+          <XCircle className="h-4 w-4 shrink-0" strokeWidth={2} /> {error}
+        </p>
+      )}
+
+      {queue.isLoading ? (
+        <div className="mt-4 flex items-center gap-2 text-sm text-royal-dim">
+          <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} /> Loading…
+        </div>
+      ) : pending.length === 0 ? (
+        <p className="mt-4 text-sm text-royal-dim" data-testid="approvals-empty">
+          Nothing waiting for approval.
+        </p>
+      ) : (
+        <div className="mt-4 divide-y divide-royal-line border border-royal-line">
+          {pending.map((e) => (
+            <div key={e.expenseId} className="px-5 py-4" data-testid={`approval-row-${e.expenseId}`}>
+              <div className="flex items-center gap-4">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-royal-cream">
+                    {e.note}
+                    <span className="ml-3 border border-royal-line px-2 py-0.5 text-[9px] uppercase tracking-[0.2em] text-royal-dim">
+                      {e.category}
+                    </span>
+                    <span className="ml-2 border border-royal-line px-2 py-0.5 text-[9px] uppercase tracking-[0.2em] text-royal-dim">
+                      {e.method.replace("_", " ")}
+                    </span>
+                  </p>
+                  <p className="mt-1 truncate text-xs text-royal-dim">
+                    {new Date(e.expenseAt).toLocaleString()} · logged by {e.staffName ?? "—"}
+                  </p>
+                </div>
+                <p className="text-sm font-bold text-royal-accent">{formatNaira(e.amountKobo)}</p>
+                <button
+                  type="button"
+                  onClick={() => approveMutation.mutate({ expenseId: e.expenseId })}
+                  disabled={approveMutation.isPending || rejectMutation.isPending}
+                  className="rounded-full border border-royal-accent px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-royal-accent transition-colors hover:bg-royal-accent hover:text-royal-bg disabled:opacity-50"
+                  data-testid={`approve-expense-${e.expenseId}`}
+                >
+                  Approve
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRejectingId(rejectingId === e.expenseId ? null : e.expenseId);
+                    setRejectReason("");
+                  }}
+                  disabled={approveMutation.isPending || rejectMutation.isPending}
+                  className="rounded-full border border-royal-line px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-royal-dim transition-colors hover:border-red-400 hover:text-red-300 disabled:opacity-50"
+                  data-testid={`reject-expense-${e.expenseId}`}
+                >
+                  Reject
+                </button>
+              </div>
+              {rejectingId === e.expenseId && (
+                <form
+                  className="mt-3 flex items-center gap-3"
+                  onSubmit={(ev) => {
+                    ev.preventDefault();
+                    if (rejectReason.trim().length >= 3) {
+                      rejectMutation.mutate({ expenseId: e.expenseId, reason: rejectReason.trim() });
+                    }
+                  }}
+                >
+                  <input
+                    className={`${inputCls} mt-0 flex-1`}
+                    value={rejectReason}
+                    onChange={(ev2) => setRejectReason(ev2.target.value)}
+                    placeholder="Why is this expense rejected? (min 3 chars)"
+                    minLength={3}
+                    required
+                    data-testid="reject-reason"
+                  />
+                  <button
+                    type="submit"
+                    disabled={rejectMutation.isPending}
+                    className="flex items-center gap-2 rounded-full border border-red-400 px-5 py-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-red-300 transition-opacity disabled:opacity-50"
+                    data-testid="reject-confirm"
+                  >
+                    {rejectMutation.isPending && <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2} />}
+                    Confirm reject
                   </button>
                 </form>
               )}
@@ -913,6 +1106,7 @@ export default function MoneyPage() {
       {has("drawer", "view") && (
         <CashDrawerSection canView={has("drawer", "view")} canManage={has("drawer", "manage")} />
       )}
+      {has("expenseApprovals", "manage") && <ExpenseApprovalsSection />}
       {has("expenses", "view") && <ExpensesSection canManage={has("expenses", "manage")} />}
       {has("terminals", "view") && <TerminalsSection canManage={has("terminals", "manage")} />}
     </div>
