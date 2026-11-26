@@ -10,9 +10,16 @@ export interface CompletedSaleResult {
   saleId: number;
   receiptNo: string;
   cashierName: string;
+  /** Cashier's staff code (e.g. RB-101) — printed next to their name. */
+  cashierStaffCode?: string | null;
+  /** Kitchen order this sale settled, when paid from the orders board. */
+  orderNo?: string | null;
+  orderLabel?: string | null;
   soldAt: string;
   lines: Array<{
     itemName: string;
+    /** Price of ONE unit before modifiers — printed as "@ ₦x each". */
+    unitPriceKobo?: number;
     quantity: number;
     modifiers: Array<{ group: string; option: string; priceDeltaKobo: number }>;
     lineTotalKobo: number;
@@ -22,6 +29,7 @@ export interface CompletedSaleResult {
   totalKobo: number;
   /** Attached customer (regulars / credit tabs). */
   customerName?: string | null;
+  customerPhone?: string | null;
   /** Amount left on the customer's credit tab by this sale. */
   creditKobo?: number;
   payments: Array<{

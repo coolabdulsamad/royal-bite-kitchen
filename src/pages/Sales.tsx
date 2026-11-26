@@ -356,12 +356,16 @@ function SaleDetailModal({
         saleId: sale.saleId,
         receiptNo: sale.receiptNo,
         cashierName: sale.cashierName,
+        cashierStaffCode: sale.cashierStaffCode,
+        orderNo: sale.orderNo,
+        orderLabel: sale.orderLabel,
         soldAt: sale.soldAt,
         lines: sale.lines,
         subtotalKobo: sale.subtotalKobo,
         discountKobo: sale.discountKobo,
         totalKobo: sale.totalKobo,
         customerName: sale.customerName,
+        customerPhone: sale.customerPhone,
         creditKobo: sale.creditKobo,
         payments: sale.payments,
         changeKobo: sale.changeKobo,
@@ -440,6 +444,57 @@ function SaleDetailModal({
                   {sale.returnReason && <p className="mt-1">“{sale.returnReason}”</p>}
                 </div>
               )}
+
+              {/* Full sale breakdown — everything about the sale at a glance */}
+              <div
+                className="mb-4 divide-y divide-royal-line/60 border border-royal-line"
+                data-testid="sale-detail-facts"
+              >
+                {[
+                  ["Receipt", sale.receiptNo],
+                  ["Date & time", fmtDate(sale.soldAt)],
+                  [
+                    "Cashier",
+                    `${sale.cashierName}${sale.cashierStaffCode ? ` · ${sale.cashierStaffCode}` : ""}`,
+                  ],
+                  [
+                    "Customer",
+                    sale.customerName
+                      ? `${sale.customerName}${sale.customerPhone ? ` · ${sale.customerPhone}` : ""}`
+                      : "Walk-in",
+                  ],
+                  ...(sale.orderLabel
+                    ? [
+                        [
+                          "Order",
+                          `${sale.orderLabel}${sale.orderNo ? ` · ${sale.orderNo}` : ""}`,
+                        ] as [string, string],
+                      ]
+                    : []),
+                  ["Status", sale.status === "returned" ? "Returned" : "Completed"],
+                  [
+                    "Items",
+                    `${sale.lines.reduce((s, l) => s + l.quantity, 0)} across ${sale.lines.length} line${sale.lines.length === 1 ? "" : "s"}`,
+                  ],
+                  [
+                    "Payments",
+                    sale.payments
+                      .map((p) => `${PAYMENT_METHOD_LABEL[p.method]} ${formatNaira(p.amountKobo)}`)
+                      .join(" · ") || "—",
+                  ],
+                  ...((sale.creditKobo ?? 0) > 0
+                    ? [["On credit", formatNaira(sale.creditKobo ?? 0)] as [string, string]]
+                    : []),
+                ].map(([label, value]) => (
+                  <div key={label} className="flex items-start justify-between gap-4 px-4 py-2.5">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-royal-dim">
+                      {label}
+                    </span>
+                    <span className="text-right text-xs text-royal-cream">{value}</span>
+                  </div>
+                ))}
+              </div>
+
               <div className="mx-auto max-w-[280px] shadow-[0_8px_40px_rgba(0,0,0,0.5)]">
                 {receiptData && <ReceiptPaper sale={receiptData} />}
               </div>

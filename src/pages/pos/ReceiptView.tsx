@@ -45,10 +45,18 @@ export function ReceiptPaper({ sale }: { sale: CompletedSaleResult }) {
         )}
         <p className="text-[10px] text-neutral-500">
           Served by {sale.cashierName}
+          {sale.cashierStaffCode ? ` · ${sale.cashierStaffCode}` : ""}
         </p>
+        {sale.orderLabel && (
+          <p className="text-[10px] text-neutral-500">
+            Order: {sale.orderLabel}
+            {sale.orderNo ? ` (${sale.orderNo})` : ""}
+          </p>
+        )}
         {sale.customerName && (
           <p className="text-[10px] font-semibold text-neutral-700">
             Customer: {sale.customerName}
+            {sale.customerPhone ? ` · ${sale.customerPhone}` : ""}
           </p>
         )}
       </div>
@@ -66,6 +74,11 @@ export function ReceiptPaper({ sale }: { sale: CompletedSaleResult }) {
                 {formatNaira(line.lineTotalKobo)}
               </span>
             </div>
+            {line.unitPriceKobo != null && (
+              <p className="pl-3 text-[10px] text-neutral-500">
+                @ {formatNaira(line.unitPriceKobo)} each
+              </p>
+            )}
             {line.modifiers.map((m, j) => (
               <p key={j} className="pl-3 text-[10px] text-neutral-600">
                 · {m.group}: {m.option}
@@ -76,6 +89,11 @@ export function ReceiptPaper({ sale }: { sale: CompletedSaleResult }) {
           </div>
         ))}
       </div>
+
+      <p className="mt-1 text-right text-[10px] text-neutral-500">
+        {sale.lines.reduce((s, l) => s + l.quantity, 0)} item
+        {sale.lines.reduce((s, l) => s + l.quantity, 0) === 1 ? "" : "s"}
+      </p>
 
       <div className="my-2 border-t border-dashed border-neutral-400" />
 

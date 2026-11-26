@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import {
+  ChevronDown,
   HandCoins,
   Loader2,
   Pencil,
@@ -22,6 +23,152 @@ const inputCls =
   "mt-2 w-full border-b border-royal-line bg-transparent py-2.5 text-sm text-royal-cream placeholder:text-royal-dim/50 transition-colors focus:border-royal-accent focus:outline-none";
 const labelCls =
   "text-[10px] font-semibold uppercase tracking-[0.25em] text-royal-dim";
+
+// ---------------------------------------------------------------------------
+// Full-profile form state — every field optional, strings only ("" = unset).
+// ---------------------------------------------------------------------------
+interface CustomerProfileForm {
+  email: string;
+  gender: "" | "male" | "female" | "other";
+  dateOfBirth: string;
+  address: string;
+  city: string;
+  state: string;
+  alternatePhone: string;
+  occupation: string;
+  guarantorName: string;
+  guarantorPhone: string;
+  referralSource: string;
+}
+
+const EMPTY_PROFILE: CustomerProfileForm = {
+  email: "",
+  gender: "",
+  dateOfBirth: "",
+  address: "",
+  city: "",
+  state: "",
+  alternatePhone: "",
+  occupation: "",
+  guarantorName: "",
+  guarantorPhone: "",
+  referralSource: "",
+};
+
+/** "" → undefined (create) — enum/date fields reject empty strings. */
+function profileForCreate(p: CustomerProfileForm) {
+  const orUndef = (v: string) => (v.trim() === "" ? undefined : v.trim());
+  return {
+    email: orUndef(p.email),
+    gender: p.gender === "" ? undefined : p.gender,
+    dateOfBirth: orUndef(p.dateOfBirth),
+    address: orUndef(p.address),
+    city: orUndef(p.city),
+    state: orUndef(p.state),
+    alternatePhone: orUndef(p.alternatePhone),
+    occupation: orUndef(p.occupation),
+    guarantorName: orUndef(p.guarantorName),
+    guarantorPhone: orUndef(p.guarantorPhone),
+    referralSource: orUndef(p.referralSource),
+  };
+}
+
+/** "" → null (update) — so a manager can CLEAR a field, not just leave it. */
+function profileForUpdate(p: CustomerProfileForm) {
+  const orNull = (v: string) => (v.trim() === "" ? null : v.trim());
+  return {
+    email: orNull(p.email),
+    gender: p.gender === "" ? null : p.gender,
+    dateOfBirth: orNull(p.dateOfBirth),
+    address: orNull(p.address),
+    city: orNull(p.city),
+    state: orNull(p.state),
+    alternatePhone: orNull(p.alternatePhone),
+    occupation: orNull(p.occupation),
+    guarantorName: orNull(p.guarantorName),
+    guarantorPhone: orNull(p.guarantorPhone),
+    referralSource: orNull(p.referralSource),
+  };
+}
+
+/** The 11 optional profile fields, as a responsive grid. */
+function CustomerProfileFields({
+  value,
+  onChange,
+  prefix,
+}: {
+  value: CustomerProfileForm;
+  onChange: (next: CustomerProfileForm) => void;
+  prefix: string;
+}) {
+  const set =
+    (key: keyof CustomerProfileForm) =>
+    (e: { target: { value: string } }) =>
+      onChange({ ...value, [key]: e.target.value });
+
+  const text = (
+    key: keyof CustomerProfileForm,
+    label: string,
+    opts: { type?: string; placeholder?: string; maxLength?: number } = {},
+  ) => (
+    <label className="block" key={key}>
+      <span className={labelCls}>{label}</span>
+      <input
+        type={opts.type ?? "text"}
+        value={value[key]}
+        onChange={set(key)}
+        placeholder={opts.placeholder}
+        maxLength={opts.maxLength}
+        data-testid={`${prefix}-${key}`}
+        className={inputCls}
+      />
+    </label>
+  );
+
+  return (
+    <div className="grid gap-x-8 gap-y-6 sm:grid-cols-2">
+      {text("email", "Email", { type: "email", placeholder: "name@example.com", maxLength: 120 })}
+      <label className="block">
+        <span className={labelCls}>Gender</span>
+        <select
+          value={value.gender}
+          onChange={set("gender")}
+          data-testid={`${prefix}-gender`}
+          className={`${inputCls} bg-royal-bgsoft`}
+        >
+          <option value="" className="bg-royal-bgsoft">—</option>
+          <option value="male" className="bg-royal-bgsoft">Male</option>
+          <option value="female" className="bg-royal-bgsoft">Female</option>
+          <option value="other" className="bg-royal-bgsoft">Other</option>
+        </select>
+      </label>
+      {text("dateOfBirth", "Date of birth", { type: "date" })}
+      {text("alternatePhone", "Alternate phone", { maxLength: 40 })}
+      <div className="sm:col-span-2">
+        {text("address", "Home / work address", { maxLength: 255 })}
+      </div>
+      {text("city", "City", { maxLength: 60 })}
+      {text("state", "State", { maxLength: 60 })}
+      {text("occupation", "Occupation", { maxLength: 80 })}
+      {text("referralSource", "How they found us", { placeholder: "Walk-in, referral, Instagram…", maxLength: 80 })}
+      <div className="sm:col-span-2">
+        <p className="mb-4 mt-2 border-t border-royal-line/60 pt-4 text-[10px] font-semibold uppercase tracking-[0.3em] text-royal-dim/70">
+          Guarantor (for credit customers)
+        </p>
+        <div className="grid gap-x-8 gap-y-6 sm:grid-cols-2">
+          {text("guarantorName", "Guarantor name", { maxLength: 120 })}
+          {text("guarantorPhone", "Guarantor phone", { maxLength: 40 })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const GENDER_LABEL: Record<string, string> = {
+  male: "Male",
+  female: "Female",
+  other: "Other",
+};
 
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleString("en-NG", {
@@ -48,13 +195,17 @@ export default function CustomersPage() {
   });
 
   const [showCreate, setShowCreate] = useState(false);
+  const [showMoreDetails, setShowMoreDetails] = useState(false);
   const [form, setForm] = useState({ name: "", phone: "", notes: "" });
+  const [profile, setProfile] = useState<CustomerProfileForm>({ ...EMPTY_PROFILE });
   const [notice, setNotice] = useState<string | null>(null);
 
   const createMutation = trpc.customers.create.useMutation({
     onSuccess: () => {
       utils.customers.list.invalidate();
       setForm({ name: "", phone: "", notes: "" });
+      setProfile({ ...EMPTY_PROFILE });
+      setShowMoreDetails(false);
       setShowCreate(false);
       setNotice("Customer added — you can now attach them at checkout.");
     },
@@ -68,6 +219,7 @@ export default function CustomersPage() {
       name: form.name,
       phone: form.phone || undefined,
       notes: form.notes || undefined,
+      ...profileForCreate(profile),
     });
   }
 
@@ -150,6 +302,26 @@ export default function CustomersPage() {
               />
             </div>
           </div>
+
+          <button
+            type="button"
+            onClick={() => setShowMoreDetails((v) => !v)}
+            data-testid="customer-create-more"
+            className="mt-6 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-royal-dim transition-colors hover:text-royal-accent"
+          >
+            <ChevronDown
+              className={`h-3.5 w-3.5 transition-transform ${showMoreDetails ? "rotate-180" : ""}`}
+              strokeWidth={2}
+            />
+            {showMoreDetails
+              ? "Hide full details"
+              : "Add full details (address, gender, guarantor, …)"}
+          </button>
+          {showMoreDetails && (
+            <div className="mt-6">
+              <CustomerProfileFields value={profile} onChange={setProfile} prefix="customer-create" />
+            </div>
+          )}
           <div className="mt-6 flex items-center gap-3">
             <button
               type="submit"
@@ -279,6 +451,7 @@ function CustomerDetailModal({
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({ name: "", phone: "", notes: "" });
+  const [editProfile, setEditProfile] = useState<CustomerProfileForm>({ ...EMPTY_PROFILE });
   const [repayAmount, setRepayAmount] = useState("");
   const [repayMethod, setRepayMethod] = useState<PaymentMethod>("cash");
   const [repayRef, setRepayRef] = useState("");
@@ -365,6 +538,19 @@ function CustomerDetailModal({
                       phone: c.phone ?? "",
                       notes: c.notes ?? "",
                     });
+                    setEditProfile({
+                      email: c.email ?? "",
+                      gender: (c.gender as CustomerProfileForm["gender"]) ?? "",
+                      dateOfBirth: c.dateOfBirth ?? "",
+                      address: c.address ?? "",
+                      city: c.city ?? "",
+                      state: c.state ?? "",
+                      alternatePhone: c.alternatePhone ?? "",
+                      occupation: c.occupation ?? "",
+                      guarantorName: c.guarantorName ?? "",
+                      guarantorPhone: c.guarantorPhone ?? "",
+                      referralSource: c.referralSource ?? "",
+                    });
                   }}
                   className="p-2 text-royal-dim transition-colors hover:text-royal-accent"
                   aria-label="Edit customer"
@@ -423,36 +609,85 @@ function CustomerDetailModal({
               </p>
             )}
 
+            {/* Profile details */}
+            {(() => {
+              const rows: Array<[string, string]> = [
+                ["Alternate phone", c.alternatePhone ?? ""],
+                ["Email", c.email ?? ""],
+                ["Gender", c.gender ? (GENDER_LABEL[c.gender] ?? c.gender) : ""],
+                ["Date of birth", c.dateOfBirth ?? ""],
+                ["Address", c.address ?? ""],
+                ["City / State", [c.city, c.state].filter(Boolean).join(", ")],
+                ["Occupation", c.occupation ?? ""],
+                ["Found us via", c.referralSource ?? ""],
+                ["Guarantor", c.guarantorName ?? ""],
+                ["Guarantor phone", c.guarantorPhone ?? ""],
+                ["Notes", c.notes ?? ""],
+              ];
+              return (
+                <div className="mt-4 border border-royal-line" data-testid="customer-profile">
+                  <p className="border-b border-royal-line px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.25em] text-royal-dim/70">
+                    Profile details
+                  </p>
+                  <div className="divide-y divide-royal-line/60">
+                    {rows.map(([label, value]) => (
+                      <div key={label} className="flex items-start justify-between gap-4 px-4 py-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-royal-dim">
+                          {label}
+                        </span>
+                        <span className={`text-right text-xs ${value ? "text-royal-cream" : "text-royal-dim/50"}`}>
+                          {value || "—"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Edit form (manager+) */}
             {editing && (
-              <div className="mt-4 border border-royal-line p-4">
-                <label className={labelCls}>Name</label>
-                <input
-                  className={inputCls}
-                  value={editForm.name}
-                  onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
-                />
-                <label className={`${labelCls} mt-3 block`}>Phone</label>
-                <input
-                  className={inputCls}
-                  value={editForm.phone}
-                  onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))}
-                />
-                <label className={`${labelCls} mt-3 block`}>Notes</label>
-                <input
-                  className={inputCls}
-                  value={editForm.notes}
-                  onChange={(e) => setEditForm((f) => ({ ...f, notes: e.target.value }))}
-                />
+              <div className="mt-4 border border-royal-line p-4" data-testid="customer-edit-form">
+                <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
+                  <label className="block">
+                    <span className={labelCls}>Name</span>
+                    <input
+                      className={inputCls}
+                      value={editForm.name}
+                      onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className={labelCls}>Phone</span>
+                    <input
+                      className={inputCls}
+                      value={editForm.phone}
+                      onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))}
+                    />
+                  </label>
+                  <label className="block sm:col-span-2">
+                    <span className={labelCls}>Notes</span>
+                    <input
+                      className={inputCls}
+                      value={editForm.notes}
+                      onChange={(e) => setEditForm((f) => ({ ...f, notes: e.target.value }))}
+                    />
+                  </label>
+                </div>
+                <div className="mt-4">
+                  <CustomerProfileFields value={editProfile} onChange={setEditProfile} prefix="customer-edit" />
+                </div>
                 <button
                   type="button"
                   disabled={busy || editForm.name.trim().length < 2}
+                  data-testid="customer-edit-save"
                   onClick={() =>
                     updateMutation.mutate({
                       id: customerId,
                       name: editForm.name.trim(),
                       phone: editForm.phone.trim() || null,
                       notes: editForm.notes.trim() || null,
+                      ...profileForUpdate(editProfile),
                     })
                   }
                   className="mt-4 rounded-full bg-royal-accent px-5 py-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-royal-bg disabled:opacity-50"

@@ -10,9 +10,16 @@ import { PAYMENT_METHOD_LABEL, type PaymentMethod } from "@contracts/payments";
 export interface ReceiptData {
   receiptNo: string;
   cashierName: string;
+  /** Cashier's staff code (e.g. RB-101) — printed next to their name. */
+  cashierStaffCode?: string | null;
+  /** Kitchen order this sale settled, when paid from the orders board. */
+  orderNo?: string | null;
+  orderLabel?: string | null;
   soldAt: string; // ISO
   lines: Array<{
     itemName: string;
+    /** Price of ONE unit before modifiers — printed as "@ ₦x each". */
+    unitPriceKobo?: number;
     quantity: number;
     modifiers: Array<{ group: string; option: string; priceDeltaKobo: number }>;
     lineTotalKobo: number;
@@ -22,6 +29,7 @@ export interface ReceiptData {
   totalKobo: number;
   /** Attached customer (regulars / credit tabs). */
   customerName?: string | null;
+  customerPhone?: string | null;
   /** Amount left on the customer's credit tab by this sale. */
   creditKobo?: number;
   payments: Array<{
@@ -175,21 +183,42 @@ export function receiptToEscPos(
   }
   b.center(formatReceiptDate(sale.soldAt), width);
   b.raw(...boldCmd(true)).center(`Receipt ${sale.receiptNo}`, width).raw(...boldCmd(false));
-  b.center(`Served by ${sale.cashierName}`, width);
+  b.center(
+    `Served by ${sale.cashierName}${sale.cashierStaffCode ? ` · ${sale.cashierStaffCode}` : ""}`,
+    width,
+  );
+  if (sale.orderLabel) {
+    b.center(
+      `Order: ${sale.orderLabel}${sale.orderNo ? ` (${sale.orderNo})` : ""}`,
+      width,
+    );
+  }
   if (sale.customerName) {
-    b.raw(...boldCmd(true)).center(`Customer: ${sale.customerName}`, width).raw(...boldCmd(false));
+    b.raw(...boldCmd(true))
+      .center(
+        `Customer: ${sale.customerName}${sale.customerPhone ? ` · ${sale.customerPhone}` : ""}`,
+        width,
+      )
+      .raw(...boldCmd(false));
   }
   b.raw(...alignCmd(0)).separator(width);
 
   // Items
   for (const line of sale.lines) {
     b.leftRight(`${line.quantity}x ${line.itemName}`, money(line.lineTotalKobo), width);
+    if (line.unitPriceKobo != null) {
+      for (const chunk of wrapText(`  @ ${money(line.unitPriceKobo)} each`, width)) {
+        b.line(chunk);
+      }
+    }
     for (const m of line.modifiers) {
       const suffix = m.priceDeltaKobo > 0 ? ` (+${money(m.priceDeltaKobo)})` : "";
       const text = `  . ${m.group}: ${m.option}${suffix}`;
       for (const chunk of wrapText(text, width)) b.line(chunk);
     }
   }
+  const itemCount = sale.lines.reduce((s, l) => s + l.quantity, 0);
+  b.leftRight("", `${itemCount} item${itemCount === 1 ? "" : "s"}`, width);
   b.separator(width);
 
   // Totals
