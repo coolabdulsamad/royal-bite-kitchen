@@ -19,7 +19,7 @@ const rangeInput = z.object({
 });
 
 /** [fromStart, toExclusive) using server-local midnights (app convention). */
-function rangeBounds(input: { from: Date; to: Date }) {
+export function rangeBounds(input: { from: Date; to: Date }) {
   const fromStart = new Date(input.from);
   fromStart.setHours(0, 0, 0, 0);
   const toEnd = new Date(input.to);
@@ -29,7 +29,7 @@ function rangeBounds(input: { from: Date; to: Date }) {
 }
 
 /** Completed, non-returned sales inside the range. */
-function salesInRange(fromStart: Date, toEnd: Date) {
+export function salesInRange(fromStart: Date, toEnd: Date) {
   return and(
     eq(sales.status, "completed"),
     isNull(sales.returnedAt),

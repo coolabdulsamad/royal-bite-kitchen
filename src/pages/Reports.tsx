@@ -1,14 +1,19 @@
 import { useMemo, useState } from "react";
 import {
+  AlertTriangle,
   BarChart3,
   CalendarDays,
+  CheckCircle2,
   Clock3,
   CreditCard,
+  Info,
   Loader2,
   Receipt,
+  Sparkles,
   TrendingUp,
   Trophy,
   Users,
+  XCircle,
 } from "lucide-react";
 import {
   Area,
@@ -130,6 +135,74 @@ function Section({ icon, title, children }: { icon: React.ReactNode; title: stri
   );
 }
 
+const TONE_STYLE: Record<string, { border: string; icon: React.ReactNode; label: string }> = {
+  bad: {
+    border: "border-red-400/50",
+    icon: <XCircle className="h-4 w-4 shrink-0 text-red-300" strokeWidth={2} />,
+    label: "text-red-300",
+  },
+  warn: {
+    border: "border-amber-400/50",
+    icon: <AlertTriangle className="h-4 w-4 shrink-0 text-amber-300" strokeWidth={2} />,
+    label: "text-amber-300",
+  },
+  good: {
+    border: "border-royal-accent/50",
+    icon: <CheckCircle2 className="h-4 w-4 shrink-0 text-royal-accent" strokeWidth={2} />,
+    label: "text-royal-accent",
+  },
+  info: {
+    border: "border-royal-line",
+    icon: <Info className="h-4 w-4 shrink-0 text-royal-dim" strokeWidth={2} />,
+    label: "text-royal-cream",
+  },
+};
+
+function InsightsSection({ range }: { range: { from: string; to: string } }) {
+  const query = trpc.insights.generate.useQuery(range);
+  const insights = query.data?.insights ?? [];
+
+  return (
+    <section className="border border-royal-line bg-royal-panel p-6" data-testid="insights">
+      <div className="flex items-center justify-between gap-4">
+        <p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.3em] text-royal-accent">
+          <Sparkles className="h-4 w-4" strokeWidth={2} />
+          Insights for this period
+        </p>
+        {query.data?.generatedAt && (
+          <p className="text-[11px] text-royal-dim">
+            computed {new Date(query.data.generatedAt).toLocaleTimeString()}
+          </p>
+        )}
+      </div>
+      {query.isLoading ? (
+        <div className="mt-4 flex items-center gap-2 text-sm text-royal-dim">
+          <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} /> Analysing…
+        </div>
+      ) : (
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {insights.map((i) => {
+            const tone = TONE_STYLE[i.tone] ?? TONE_STYLE.info;
+            return (
+              <div
+                key={i.id}
+                className={`border ${tone.border} bg-royal-bg px-4 py-3`}
+                data-testid={`insight-${i.id}`}
+              >
+                <p className={`flex items-center gap-2 text-sm font-semibold ${tone.label}`}>
+                  {tone.icon}
+                  {i.title}
+                </p>
+                <p className="mt-1.5 text-[13px] leading-5 text-royal-dim">{i.body}</p>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 const tooltipStyle = {
   contentStyle: {
     background: "#1E0F35",
@@ -231,6 +304,8 @@ export default function ReportsPage() {
         </div>
       ) : (
         <>
+          <InsightsSection range={range} />
+
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <KpiTile label="Revenue" value={formatNaira(o?.revenueKobo ?? 0)} testid="kpi-revenue" tone="accent" />
             <KpiTile label="Sales" value={String(o?.salesCount ?? 0)} testid="kpi-sales" />
