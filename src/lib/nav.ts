@@ -13,6 +13,7 @@ import {
   KeyRound,
   Clock,
   ScrollText,
+  HandCoins,
 } from "lucide-react";
 import type { StaffRole } from "@contracts/roles";
 
@@ -45,6 +46,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: "Customers", path: "/customers", icon: Users, phase: "Live", minRole: "sales" },
       { title: "Stock", path: "/stock", icon: Package, phase: "Live", minRole: "sales" },
       { title: "Money", path: "/money", icon: Wallet, phase: "Live", minRole: "sales" },
+      { title: "Settlements", path: "/settlements", icon: HandCoins, phase: "Live", minRole: "manager" },
       { title: "Staff", path: "/staff", icon: UserCog, phase: "Live", minRole: "admin" },
       { title: "Reports", path: "/reports", icon: BarChart3, phase: "Live", minRole: "manager" },
     ],

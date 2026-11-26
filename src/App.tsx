@@ -16,6 +16,7 @@ import StockPage from "@/pages/Stock";
 import AttendancePage from "@/pages/Attendance";
 import ReportsPage from "@/pages/Reports";
 import SettingsPage from "@/pages/Settings";
+import SettlementsPage from "@/pages/Settlements";
 
 export default function App() {
   return (
@@ -66,6 +67,14 @@ export default function App() {
           element={
             <RequireAuth minRole="manager">
               <ReportsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/settlements"
+          element={
+            <RequireAuth minRole="manager">
+              <SettlementsPage />
             </RequireAuth>
           }
         />

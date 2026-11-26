@@ -24,6 +24,7 @@ import {
   type OrderStatus,
 } from "@contracts/orders";
 import { ORDER_SOURCE_LABEL } from "@contracts/partners";
+import { ORDER_SETTLEMENT_LABEL } from "@contracts/settlements";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../api/router";
 import { NewOrderModal } from "./orders/NewOrderModal";
@@ -470,6 +471,30 @@ function TicketCard({
               Paid
             </span>
           )}
+          {order.source !== "pos" && order.settlementState && (
+            <span
+              data-testid={`order-settlement-${order.settlementState}`}
+              title={
+                order.settlementState === "settled"
+                  ? `Settled via ${order.settlementInvoiceNo ?? "invoice"}`
+                  : order.settlementState === "invoiced"
+                    ? `On ${order.settlementInvoiceNo ?? "an invoice"} — awaiting partner payment`
+                    : "The partner pays for this in a batch settlement — see Settlements"
+              }
+              className={`border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] ${
+                order.settlementState === "settled"
+                  ? "border-emerald-400/50 bg-emerald-400/10 text-emerald-300"
+                  : order.settlementState === "invoiced"
+                    ? "border-royal-accent/50 bg-royal-accent/10 text-royal-accent"
+                    : "border-amber-400/50 bg-amber-400/10 text-amber-300"
+              }`}
+            >
+              {ORDER_SETTLEMENT_LABEL[order.settlementState]}
+              {order.settlementInvoiceNo && order.settlementState !== "unsettled"
+                ? ` · ${order.settlementInvoiceNo}`
+                : ""}
+            </span>
+          )}
         </p>
         {active ? (
           <span
@@ -573,7 +598,7 @@ function TicketCard({
             {next.action}
           </button>
         )}
-        {active && !paid && (
+        {active && !paid && order.source === "pos" && (
           <button
             type="button"
             onClick={onPay}
