@@ -514,3 +514,26 @@ export const orderItemsRelations = relations(orderItems, ({ one }) => ({
 
 export type Order = typeof orders.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// Attendance — one open shift per staff member (enforced in a transaction
+// that locks the user row; MySQL has no partial unique indexes).
+// ---------------------------------------------------------------------------
+
+export const attendanceRecords = mysqlTable("attendance_records", {
+  id: serial("id").primaryKey(),
+  userId: bigint("user_id", { mode: "number", unsigned: true })
+    .notNull()
+    .references(() => users.id),
+  clockInAt: timestamp("clock_in_at").notNull(),
+  clockOutAt: timestamp("clock_out_at"),
+  clockInNote: varchar("clock_in_note", { length: 255 }),
+  clockOutNote: varchar("clock_out_note", { length: 255 }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const attendanceRecordsRelations = relations(attendanceRecords, ({ one }) => ({
+  user: one(users, { fields: [attendanceRecords.userId], references: [users.id] }),
+}));
+
+export type AttendanceRecord = typeof attendanceRecords.$inferSelect;
