@@ -45,7 +45,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: "Stock", path: "/stock", icon: Package, phase: "Live", minRole: "sales" },
       { title: "Money", path: "/money", icon: Wallet, phase: "Live", minRole: "sales" },
       { title: "Staff", path: "/staff", icon: UserCog, phase: "Live", minRole: "admin" },
-      { title: "Reports", path: "/reports", icon: BarChart3, phase: "Phase 3", minRole: "manager" },
+      { title: "Reports", path: "/reports", icon: BarChart3, phase: "Live", minRole: "manager" },
     ],
   },
   {

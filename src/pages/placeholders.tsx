@@ -20,16 +20,6 @@ export function SalesPage() {
   );
 }
 
-export function ReportsPage() {
-  return (
-    <SectionPlaceholder
-      title="Reports"
-      phase="Phase 3"
-      description="Sales analytics and KPI dashboards: revenue trends, top-selling items, peak hours, payment-method breakdown — with AI insights arriving in Phase 4."
-    />
-  );
-}
-
 export function SettingsPage() {
   return (
     <SectionPlaceholder

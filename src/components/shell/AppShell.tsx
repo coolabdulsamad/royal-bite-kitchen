@@ -73,7 +73,7 @@ function SidebarFooter() {
   return (
     <div className="border-t border-royal-line px-5 py-3">
       <p className="text-[10px] tracking-wide text-royal-dim/60">
-        v0.9 · Phase 1 — sales history live
+        v18 · Phase 3 — reports live
       </p>
     </div>
   );
