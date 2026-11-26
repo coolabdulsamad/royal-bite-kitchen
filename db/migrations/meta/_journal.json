@@ -71,6 +71,13 @@
       "when": 1795651810767,
       "tag": "0009_cuddly_nemesis",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1795653847163,
+      "tag": "0010_clumsy_fenris",
+      "breakpoints": true
     }
   ]
 }

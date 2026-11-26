@@ -537,3 +537,34 @@ export const attendanceRecordsRelations = relations(attendanceRecords, ({ one })
 }));
 
 export type AttendanceRecord = typeof attendanceRecords.$inferSelect;
+
+// ---- Step 17: expenses & cash drawer ----
+export const expenses = mysqlTable("expenses", {
+  id: serial("id").primaryKey(),
+  category: mysqlEnum("category", ["supplies", "utilities", "wages", "rent", "transport", "equipment", "other"]).notNull(),
+  amountKobo: int("amount_kobo").notNull(),
+  note: varchar("note", { length: 500 }).notNull(),
+  method: mysqlEnum("method", ["cash", "bank_pos", "transfer"]).notNull(),
+  staffId: bigint("staff_id", { mode: "number", unsigned: true }).notNull().references(() => users.id),
+  expenseAt: timestamp("expense_at").notNull().defaultNow(),
+  voidedAt: timestamp("voided_at"),
+  voidedById: bigint("voided_by_id", { mode: "number", unsigned: true }).references(() => users.id),
+  voidReason: varchar("void_reason", { length: 255 }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const drawerCounts = mysqlTable("drawer_counts", {
+  id: serial("id").primaryKey(),
+  countedKobo: int("counted_kobo").notNull(),
+  expectedKobo: int("expected_kobo").notNull(),
+  note: varchar("note", { length: 255 }),
+  countedById: bigint("counted_by_id", { mode: "number", unsigned: true }).notNull().references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const expensesRelations = relations(expenses, ({ one }) => ({
+  staff: one(users, { fields: [expenses.staffId], references: [users.id] }),
+}));
+export const drawerCountsRelations = relations(drawerCounts, ({ one }) => ({
+  countedBy: one(users, { fields: [drawerCounts.countedById], references: [users.id] }),
+}));

@@ -46,7 +46,7 @@ export default function App() {
         <Route
           path="/money"
           element={
-            <RequireAuth minRole="manager">
+            <RequireAuth>
               <MoneyPage />
             </RequireAuth>
           }
