@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Check, Copy, KeyRound, Plus, Power, RefreshCw, X } from "lucide-react";
 import { trpc } from "@/providers/trpc";
+import { usePerms } from "@/lib/perms";
 import { PARTNER_LABEL, type PartnerProvider } from "@contracts/partners";
 
 /**
@@ -10,6 +11,8 @@ import { PARTNER_LABEL, type PartnerProvider } from "@contracts/partners";
  * rotate — it is never returned by the list endpoint.
  */
 export function PartnersModal({ onClose }: { onClose: () => void }) {
+  const { has } = usePerms();
+  const canManage = has("partners", "manage");
   const utils = trpc.useUtils();
   const list = trpc.partners.list.useQuery();
   const [provider, setProvider] = useState<PartnerProvider>("glovo");
@@ -87,6 +90,7 @@ export function PartnersModal({ onClose }: { onClose: () => void }) {
         </div>
 
         {/* New connection */}
+        {canManage && (
         <div className="mt-5 border border-royal-line p-4">
           <p className="text-[10px] font-semibold uppercase tracking-[0.25em] text-royal-dim">
             New connection
@@ -152,6 +156,7 @@ export function PartnersModal({ onClose }: { onClose: () => void }) {
             </button>
           </div>
         </div>
+        )}
 
         {/* One-time token reveal */}
         {reveal && (
@@ -228,12 +233,18 @@ export function PartnersModal({ onClose }: { onClose: () => void }) {
                   ? `Last order ${new Date(c.lastOrderAt).toLocaleString("en-NG")}`
                   : "No orders received yet"}
               </p>
-              <CommissionEditor
-                connectionId={c.id}
-                commissionBps={c.commissionBps}
-                pending={update.isPending}
-                onSave={(bps) => update.mutate({ id: c.id, commissionBps: bps })}
-              />
+              {canManage ? (
+                <CommissionEditor
+                  connectionId={c.id}
+                  commissionBps={c.commissionBps}
+                  pending={update.isPending}
+                  onSave={(bps) => update.mutate({ id: c.id, commissionBps: bps })}
+                />
+              ) : (
+                <p className="mt-1 text-[11px] text-royal-dim">
+                  Commission {(c.commissionBps / 100).toFixed(1)}%
+                </p>
+              )}
               <div className="mt-2 flex items-center gap-2">
                 <code className="flex-1 select-all break-all border border-royal-line bg-royal-surface/60 px-3 py-1.5 text-[11px] text-royal-dim">
                   {webhookUrl(c.provider)}
@@ -250,6 +261,7 @@ export function PartnersModal({ onClose }: { onClose: () => void }) {
                     <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />
                   )}
                 </button>
+                {canManage && (
                 <button
                   type="button"
                   title={c.active ? "Disable connection" : "Enable connection"}
@@ -263,6 +275,8 @@ export function PartnersModal({ onClose }: { onClose: () => void }) {
                 >
                   <Power className="h-3.5 w-3.5" strokeWidth={1.75} />
                 </button>
+                )}
+                {canManage && (
                 <button
                   type="button"
                   title="Rotate token (old token stops working)"
@@ -276,6 +290,7 @@ export function PartnersModal({ onClose }: { onClose: () => void }) {
                     <KeyRound className="h-3.5 w-3.5" strokeWidth={1.75} />
                   )}
                 </button>
+                )}
               </div>
             </div>
           ))}

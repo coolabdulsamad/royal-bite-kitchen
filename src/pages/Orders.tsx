@@ -12,7 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { trpc } from "@/providers/trpc";
-import { useAuth } from "@/lib/auth";
+import { usePerms } from "@/lib/perms";
 import { printerManager, usePrinter } from "@/lib/printing/printer";
 import { formatNaira } from "@contracts/money";
 import {
@@ -82,10 +82,12 @@ function formatElapsed(min: number): string {
 }
 
 export default function OrdersPage() {
-  const { user } = useAuth();
   const navigate = useNavigate();
   const { settings: printerSettings, direct } = usePrinter();
-  const isManager = user?.role === "manager" || user?.role === "admin" || user?.role === "superadmin";
+  const { has } = usePerms();
+  const canManageOrders = has("orders", "manage");
+  const canPay = has("pos", "manage");
+  const canSeePartners = has("partners", "view");
 
   const [filter, setFilter] = useState<Filter>("active");
   const [newOpen, setNewOpen] = useState(false);
@@ -235,7 +237,7 @@ export default function OrdersPage() {
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          {isManager && (
+          {canSeePartners && (
             <button
               type="button"
               onClick={() => setPartnersOpen(true)}
@@ -334,7 +336,8 @@ export default function OrdersPage() {
                         key={o.id}
                         order={o}
                         now={now}
-                        isManager={isManager}
+                        canManage={canManageOrders}
+                        canPay={canPay}
                         printerReady={direct !== null}
                         pending={advance.isPending || cancel.isPending}
                         onAdvance={(to) => advance.mutate({ orderId: o.id, to })}
@@ -357,7 +360,8 @@ export default function OrdersPage() {
                 key={o.id}
                 order={o}
                 now={now}
-                isManager={isManager}
+                canManage={canManageOrders}
+                canPay={canPay}
                 printerReady={direct !== null}
                 pending={advance.isPending || cancel.isPending}
                 onAdvance={(to) => advance.mutate({ orderId: o.id, to })}
@@ -405,7 +409,8 @@ export default function OrdersPage() {
 function TicketCard({
   order,
   now,
-  isManager,
+  canManage,
+  canPay,
   printerReady,
   pending,
   onAdvance,
@@ -415,7 +420,8 @@ function TicketCard({
 }: {
   order: BoardOrder;
   now: number;
-  isManager: boolean;
+  canManage: boolean;
+  canPay: boolean;
   printerReady: boolean;
   pending: boolean;
   onAdvance: (to: "preparing" | "ready" | "served") => void;
@@ -588,7 +594,7 @@ function TicketCard({
 
       {/* Actions */}
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        {next && (
+        {next && canManage && (
           <button
             type="button"
             disabled={pending}
@@ -598,7 +604,7 @@ function TicketCard({
             {next.action}
           </button>
         )}
-        {active && !paid && order.source === "pos" && (
+        {active && !paid && order.source === "pos" && canPay && (
           <button
             type="button"
             onClick={onPay}
@@ -617,7 +623,7 @@ function TicketCard({
         >
           <Printer className="h-3.5 w-3.5" strokeWidth={1.75} />
         </button>
-        {isManager && !paid && order.status !== "completed" && order.status !== "cancelled" && (
+        {canManage && !paid && order.status !== "completed" && order.status !== "cancelled" && (
           <button
             type="button"
             onClick={onCancel}

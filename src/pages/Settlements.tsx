@@ -20,6 +20,7 @@ import { ORDER_SOURCE_LABEL } from "@contracts/partners";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../api/router";
 import { printSettlementInvoice } from "@/lib/printInvoice";
+import { usePerms } from "@/lib/perms";
 
 type Overview = inferRouterOutputs<AppRouter>["settlements"]["overview"];
 type InvoiceRow = inferRouterOutputs<AppRouter>["settlements"]["invoices"]["rows"][number];
@@ -58,6 +59,8 @@ function StatusBadge({ status }: { status: SettlementStatus }) {
 
 export default function SettlementsPage() {
   const utils = trpc.useUtils();
+  const { has } = usePerms();
+  const canManage = has("settlements", "manage");
   const [tab, setTab] = useState<"unsettled" | "invoices">("unsettled");
 
   // Overview range (the "received" tiles) — default: this month.
@@ -199,6 +202,7 @@ export default function SettlementsPage() {
         {tab === "unsettled" ? (
           <UnsettledTab
             partners={overview.data?.partners ?? []}
+            canManage={canManage}
             onChanged={invalidateAll}
             onOpenInvoice={(id) => setDetailId(id)}
           />
@@ -213,6 +217,7 @@ export default function SettlementsPage() {
       {detailId !== null && (
         <InvoiceDetailModal
           invoiceId={detailId}
+          canManage={canManage}
           onClose={() => setDetailId(null)}
           onChanged={invalidateAll}
         />
@@ -255,10 +260,12 @@ function Tile({
 
 function UnsettledTab({
   partners,
+  canManage,
   onChanged,
   onOpenInvoice,
 }: {
   partners: Overview["partners"];
+  canManage: boolean;
   onChanged: () => void;
   onOpenInvoice: (id: number) => void;
 }) {
@@ -372,6 +379,7 @@ function UnsettledTab({
             className="w-56 border border-royal-line bg-transparent py-2 pl-8 pr-3 text-xs text-royal-cream placeholder:text-royal-dim/50 focus:border-royal-accent focus:outline-none"
           />
         </div>
+        {canManage && (
         <button
           type="button"
           onClick={selectAllShown}
@@ -379,6 +387,7 @@ function UnsettledTab({
         >
           Select all shown
         </button>
+        )}
       </div>
 
       {hint && (
@@ -393,7 +402,7 @@ function UnsettledTab({
         <table className="w-full min-w-[760px] text-left text-sm">
           <thead>
             <tr className="border-b border-royal-line text-[10px] uppercase tracking-[0.2em] text-royal-dim">
-              <th className="w-10 px-3 py-2.5" />
+              {canManage && <th className="w-10 px-3 py-2.5" />}
               <th className="px-3 py-2.5">Order</th>
               <th className="px-3 py-2.5">Partner</th>
               <th className="px-3 py-2.5">Customer</th>
@@ -403,22 +412,23 @@ function UnsettledTab({
           </thead>
           <tbody>
             {query.isLoading && (
-              <tr><td colSpan={6} className="px-3 py-10 text-center text-royal-dim">Loading unsettled orders…</td></tr>
+              <tr><td colSpan={canManage ? 6 : 5} className="px-3 py-10 text-center text-royal-dim">Loading unsettled orders…</td></tr>
             )}
             {query.data && rows.length === 0 && (
-              <tr><td colSpan={6} className="px-3 py-10 text-center text-royal-dim">Nothing outstanding — every delivered partner order is invoiced or settled.</td></tr>
+              <tr><td colSpan={canManage ? 6 : 5} className="px-3 py-10 text-center text-royal-dim">Nothing outstanding — every delivered partner order is invoiced or settled.</td></tr>
             )}
             {rows.map((o) => {
-              const checked = selected.has(o.id);
+              const checked = canManage && selected.has(o.id);
               return (
                 <tr
                   key={o.id}
                   data-testid={`unsettled-row-${o.id}`}
-                  onClick={() => toggle(o)}
-                  className={`cursor-pointer border-b border-royal-line/50 transition-colors ${
-                    checked ? "bg-royal-accent/10" : "hover:bg-royal-faint/30"
-                  }`}
+                  onClick={canManage ? () => toggle(o) : undefined}
+                  className={`border-b border-royal-line/50 transition-colors ${
+                    canManage ? "cursor-pointer" : ""
+                  } ${checked ? "bg-royal-accent/10" : "hover:bg-royal-faint/30"}`}
                 >
+                  {canManage && (
                   <td className="px-3 py-2.5">
                     <span
                       className={`flex h-4.5 w-4.5 items-center justify-center border ${
@@ -428,6 +438,7 @@ function UnsettledTab({
                       {checked && <Check className="h-3 w-3" strokeWidth={3} />}
                     </span>
                   </td>
+                  )}
                   <td className="px-3 py-2.5">
                     <p className="font-semibold text-royal-cream">{o.orderNo}</p>
                     <p className="text-[11px] text-royal-dim">
@@ -454,7 +465,7 @@ function UnsettledTab({
       </div>
 
       {/* Sticky action bar */}
-      {selected.size > 0 && (
+      {canManage && selected.size > 0 && (
         <div
           data-testid="invoice-action-bar"
           className="sticky bottom-0 mt-4 flex flex-wrap items-center gap-3 border border-royal-accent/50 bg-royal-panel px-4 py-3 shadow-2xl"
@@ -487,7 +498,7 @@ function UnsettledTab({
         </div>
       )}
 
-      {confirming && selectedPartnerRow && (
+      {canManage && confirming && selectedPartnerRow && (
         <ConfirmInvoiceModal
           partnerName={selectedPartnerRow.name}
           commissionBps={selectedPartnerRow.commissionBps}
@@ -760,10 +771,12 @@ function InvoiceTableRow({ inv, onOpen }: { inv: InvoiceRow; onOpen: () => void 
 
 function InvoiceDetailModal({
   invoiceId,
+  canManage,
   onClose,
   onChanged,
 }: {
   invoiceId: number;
+  canManage: boolean;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -899,7 +912,7 @@ function InvoiceDetailModal({
                 <Printer className="h-4 w-4" strokeWidth={1.75} />
                 Print
               </button>
-              {inv.status === "open" && !payOpen && !cancelOpen && (
+              {canManage && inv.status === "open" && !payOpen && !cancelOpen && (
                 <>
                   <button
                     type="button"
@@ -922,7 +935,7 @@ function InvoiceDetailModal({
               )}
             </div>
 
-            {payOpen && inv.status === "open" && (
+            {canManage && payOpen && inv.status === "open" && (
               <div className="mt-4 border border-emerald-400/40 bg-emerald-400/5 p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-300">
                   Record settlement payment
@@ -977,7 +990,7 @@ function InvoiceDetailModal({
               </div>
             )}
 
-            {cancelOpen && inv.status === "open" && (
+            {canManage && cancelOpen && inv.status === "open" && (
               <div className="mt-4 border border-rose-400/40 bg-rose-400/5 p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-rose-300">
                   Cancel this invoice

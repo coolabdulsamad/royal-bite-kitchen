@@ -33,6 +33,7 @@ const ACTION_LABEL: Record<string, string> = {
   "settlement.paid": "Settlement paid",
   "settlement.cancel": "Settlement cancelled",
   "settings.update": "Settings updated",
+  "permissions.update": "Permissions changed",
 };
 
 const inputCls =
