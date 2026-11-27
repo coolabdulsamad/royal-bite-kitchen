@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from "react-router";
 import {
   AlertTriangle,
   Bell,
+  Package,
   ShieldCheck,
   UtensilsCrossed,
   Volume2,
@@ -13,6 +14,7 @@ import { trpc } from "@/providers/trpc";
 import { usePerms } from "@/lib/perms";
 import { timeAgo, useNotifications } from "@/lib/notifications";
 import { formatNaira } from "@contracts/money";
+import { formatQty } from "@contracts/stock";
 
 const HOVER_OPEN_MS = 150;
 const HOVER_CLOSE_MS = 250;
@@ -20,7 +22,7 @@ const HOVER_CLOSE_MS = 250;
 export function NotificationBell() {
   const { has } = usePerms();
   const navigate = useNavigate();
-  const { orders, approvals, unreadOrders, markOrdersSeen, soundOn, toggleSound } =
+  const { orders, approvals, lowStock, unreadOrders, markOrdersSeen, soundOn, toggleSound } =
     useNotifications();
 
   const [open, setOpen] = useState(false);
@@ -41,7 +43,7 @@ export function NotificationBell() {
     (i) => i.tone === "bad" || i.tone === "warn",
   );
 
-  const badge = unreadOrders + approvals.length + alertItems.length;
+  const badge = unreadOrders + approvals.length + lowStock.length + alertItems.length;
 
   // Opening the panel counts as "seen" for the unread-order badge.
   useEffect(() => {
@@ -220,6 +222,54 @@ export function NotificationBell() {
                     </button>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Low stock (stock viewers only — server-gated) */}
+            {lowStock.length > 0 && (
+              <div data-testid="notif-lowstock">
+                <p className="border-y border-royal-line/60 px-4 pb-1.5 pt-3 text-[9px] font-semibold uppercase tracking-[0.25em] text-amber-300/90">
+                  Low stock · {lowStock.length}
+                </p>
+                <div className="divide-y divide-royal-line/50">
+                  {lowStock.slice(0, 8).map((s) => (
+                    <button
+                      key={s.itemId}
+                      type="button"
+                      data-testid={`notif-stock-${s.itemId}`}
+                      onClick={() => go(`/stock/${s.itemId}`)}
+                      className="flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors hover:bg-royal-faint/30"
+                    >
+                      <Package
+                        className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300"
+                        strokeWidth={1.75}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-baseline justify-between gap-2">
+                          <span className="truncate text-xs font-semibold text-royal-cream">
+                            {s.name}
+                          </span>
+                          <span className="shrink-0 text-[10px] font-semibold text-amber-300">
+                            {formatQty(s.quantityMilli)} {s.unit} left
+                          </span>
+                        </span>
+                        <span className="mt-0.5 block text-[11px] text-royal-dim">
+                          alert at {formatQty(s.lowStockAtMilli)} {s.unit} — time to restock
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <NavLink
+                  to="/stock"
+                  onClick={() => {
+                    setOpen(false);
+                    setPinned(false);
+                  }}
+                  className="block border-t border-royal-line/60 px-4 py-2.5 text-center text-[9px] font-semibold uppercase tracking-[0.25em] text-amber-300 transition-colors hover:bg-royal-faint/40"
+                >
+                  Open stock
+                </NavLink>
               </div>
             )}
 

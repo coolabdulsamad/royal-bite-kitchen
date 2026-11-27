@@ -16,6 +16,7 @@ import MoneyPage from "@/pages/Money";
 import ActivityPage from "@/pages/Activity";
 import CustomersPage from "@/pages/Customers";
 import StockPage from "@/pages/Stock";
+import StockItemPage from "@/pages/StockItem";
 import AttendancePage from "@/pages/Attendance";
 import ReportsPage from "@/pages/Reports";
 import SettingsPage from "@/pages/Settings";
@@ -51,6 +52,7 @@ export default function App() {
         <Route path="/sales" element={gated("/sales", <SalesPage />)} />
         <Route path="/customers" element={gated("/customers", <CustomersPage />)} />
         <Route path="/stock" element={gated("/stock", <StockPage />)} />
+        <Route path="/stock/:id" element={gated("/stock", <StockItemPage />)} />
         <Route path="/attendance" element={<AttendancePage />} />
         <Route path="/account" element={<AccountPage />} />
         <Route path="/menu" element={gated("/menu", <MenuPage />)} />

@@ -13,6 +13,7 @@ import { trpc } from "@/providers/trpc";
 import { useAuth } from "@/lib/auth";
 import { formatNaira } from "@contracts/money";
 import { armSoundUnlock, isSoundOn, playApprovalBlip, playOrderChime, setSoundOn } from "@/lib/sound";
+import { formatQty } from "@contracts/stock";
 
 /** Toasts live 8 minutes (the user asked for a 5–10 min window) unless dismissed. */
 export const TOAST_TTL_MS = 8 * 60 * 1000;
@@ -21,7 +22,7 @@ const POLL_MS = 15_000;
 
 export interface OrderToast {
   id: string;
-  kind: "order" | "approval";
+  kind: "order" | "approval" | "stock";
   title: string;
   body: string;
   href: string;
@@ -51,12 +52,21 @@ export interface FeedApproval {
   expenseAt: string;
 }
 
+export interface FeedLowStock {
+  itemId: number;
+  name: string;
+  unit: string;
+  quantityMilli: number;
+  lowStockAtMilli: number;
+}
+
 interface NotificationsValue {
   toasts: OrderToast[];
   dismiss: (id: string) => void;
   open: (t: OrderToast) => void;
   orders: FeedOrder[];
   approvals: FeedApproval[];
+  lowStock: FeedLowStock[];
   unreadOrders: number;
   markOrdersSeen: () => void;
   soundOn: boolean;
@@ -101,6 +111,9 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   // Ids already notified (or baselined) — toasts fire exactly once per entity.
   const knownOrders = useRef<Set<number>>(new Set());
   const knownApprovals = useRef<Set<number>>(new Set());
+  // Low stock is a STATE, not an event: the set holds the previous feed's low
+  // ids, so an item that recovers and drops low again re-alerts.
+  const prevLowStock = useRef<Set<number>>(new Set());
   const baselined = useRef(false);
   const timers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
@@ -111,6 +124,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     knownOrders.current = new Set();
     knownApprovals.current = new Set();
+    prevLowStock.current = new Set();
     baselined.current = false;
     setToasts([]);
     timers.current.forEach((t) => clearTimeout(t));
@@ -150,14 +164,20 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     () => (feed.data?.pendingExpenses ?? []) as FeedApproval[],
     [feed.data],
   );
+  const lowStock: FeedLowStock[] = useMemo(
+    () => (feed.data?.lowStock ?? []) as FeedLowStock[],
+    [feed.data],
+  );
 
   // Diff each fresh feed: first load is the silent baseline, afterwards every
   // genuinely new id pops a toast (+ chime for orders, blip for approvals).
   useEffect(() => {
     if (!feed.data || !user) return;
+    const currentLow = new Set(lowStock.map((s) => s.itemId));
     if (!baselined.current) {
       knownOrders.current = new Set(orders.map((o) => o.orderId));
       knownApprovals.current = new Set(approvals.map((a) => a.expenseId));
+      prevLowStock.current = currentLow;
       baselined.current = true;
       // First visit on this device: never show a huge "unread" pile from
       // before the user even opened the app.
@@ -196,6 +216,20 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       });
       playApprovalBlip();
     }
+    // Newly low items (weren't low in the previous feed).
+    for (const s of lowStock) {
+      if (prevLowStock.current.has(s.itemId)) continue;
+      pushToast({
+        id: `stock-${s.itemId}-${Date.now()}`,
+        kind: "stock",
+        title: `Low stock · ${s.name}`,
+        body: `${formatQty(s.quantityMilli)} ${s.unit} left — alert at ${formatQty(s.lowStockAtMilli)} ${s.unit}`,
+        href: `/stock/${s.itemId}`,
+        createdAt: Date.now(),
+      });
+      playApprovalBlip();
+    }
+    prevLowStock.current = currentLow;
   }, [feed.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const unreadOrders = useMemo(() => {
@@ -231,6 +265,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     open,
     orders,
     approvals,
+    lowStock,
     unreadOrders,
     markOrdersSeen,
     soundOn,

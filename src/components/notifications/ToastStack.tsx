@@ -1,9 +1,11 @@
-import { ShieldCheck, UtensilsCrossed, X } from "lucide-react";
+import { AlertTriangle, ShieldCheck, UtensilsCrossed, X } from "lucide-react";
 import { TOAST_TTL_MS, timeAgo, useNotifications, type OrderToast } from "@/lib/notifications";
 
 function ToastCard({ toast }: { toast: OrderToast }) {
   const { dismiss, open } = useNotifications();
   const isOrder = toast.kind === "order";
+  const Icon =
+    toast.kind === "order" ? UtensilsCrossed : toast.kind === "stock" ? AlertTriangle : ShieldCheck;
 
   return (
     <div
@@ -32,7 +34,7 @@ function ToastCard({ toast }: { toast: OrderToast }) {
           {isOrder ? (
             <UtensilsCrossed className="h-4 w-4" strokeWidth={1.75} />
           ) : (
-            <ShieldCheck className="h-4 w-4" strokeWidth={1.75} />
+            <Icon className="h-4 w-4" strokeWidth={1.75} />
           )}
         </span>
         <span className="min-w-0 flex-1">

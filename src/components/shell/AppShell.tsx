@@ -107,7 +107,7 @@ function SidebarFooter({
     >
       {!collapsed && (
         <p className="text-[10px] tracking-wide text-royal-dim/60">
-          v31 · Royal Bite Kitchen POS
+          v32 · Royal Bite Kitchen POS
         </p>
       )}
       {onToggle && (
