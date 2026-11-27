@@ -443,16 +443,16 @@ function TicketCard({
 
   return (
     <article
-      className={`border bg-royal-surface/60 p-4 ${
+      className={`min-w-0 border bg-royal-surface/60 p-3 sm:p-4 ${
         active && min >= ORDER_ELAPSED_LATE_MIN
           ? "border-rose-400/50"
           : "border-royal-line"
       }`}
     >
-      {/* Top row: order no + source badge + elapsed / status */}
-      <div className="flex items-center justify-between gap-2">
-        <p className="flex items-center gap-2 text-sm font-semibold text-royal-cream">
-          {order.orderNo}
+      {/* Top row: order no + source badge + elapsed / status — wraps on narrow cards */}
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
+        <p className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm font-semibold text-royal-cream">
+          <span className="whitespace-nowrap">{order.orderNo}</span>
           {order.source !== "pos" && (
             <span
               className={`border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] ${
@@ -504,7 +504,7 @@ function TicketCard({
         </p>
         {active ? (
           <span
-            className={`flex items-center gap-1 border px-2 py-0.5 text-[10px] font-semibold ${elapsedTone}`}
+            className={`flex shrink-0 items-center gap-1 border px-2 py-0.5 text-[10px] font-semibold ${elapsedTone}`}
           >
             <Clock3 className="h-3 w-3" strokeWidth={2} />
             {formatElapsed(min)}
@@ -526,7 +526,7 @@ function TicketCard({
       </div>
 
       {/* Table / customer */}
-      <p className="mt-1 font-display text-xl leading-tight text-royal-cream">
+      <p className="mt-1 font-display text-xl leading-tight text-royal-cream break-words">
         {order.label}
       </p>
 
@@ -535,7 +535,7 @@ function TicketCard({
         <div className="mt-2 space-y-0.5 border border-royal-line/70 bg-royal-surface/40 px-2 py-1.5 text-xs text-royal-dim">
           <p className="flex items-center gap-1.5">
             <Bike className="h-3 w-3 shrink-0" strokeWidth={1.75} />
-            <span>
+            <span className="min-w-0 break-all">
               {ORDER_SOURCE_LABEL[order.source]} delivery
               {order.externalId ? ` · ${order.externalId}` : ""}
             </span>
