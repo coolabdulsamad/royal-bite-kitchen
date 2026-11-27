@@ -198,7 +198,7 @@ export function NotificationBell() {
                       key={a.expenseId}
                       type="button"
                       data-testid={`notif-approval-${a.expenseId}`}
-                      onClick={() => go("/money")}
+                      onClick={() => go("/money?tab=approvals")}
                       className="flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors hover:bg-royal-faint/30"
                     >
                       <ShieldCheck

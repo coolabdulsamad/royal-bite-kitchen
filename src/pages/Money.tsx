@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router";
 import {
   Banknote,
   CheckCircle2,
@@ -8,8 +9,11 @@ import {
   Plus,
   Power,
   PowerOff,
+  Printer,
   Receipt,
+  RotateCcw,
   Scale,
+  Search,
   ShieldCheck,
   Wallet,
   XCircle,
@@ -17,11 +21,24 @@ import {
 import { trpc } from "@/providers/trpc";
 import { formatNaira } from "@contracts/money";
 import { usePerms } from "@/lib/perms";
+import {
+  printDrawerSheet,
+  printExpenses,
+  printTerminalTakings,
+} from "@/lib/printMoney";
 
 const inputCls =
   "mt-2 w-full border-b border-royal-line bg-transparent py-2.5 text-sm text-royal-cream placeholder:text-royal-dim/50 transition-colors focus:border-royal-accent focus:outline-none";
 const labelCls =
   "text-[10px] font-semibold uppercase tracking-[0.25em] text-royal-dim";
+const dateCls =
+  "border-b border-royal-line bg-transparent px-1 py-1.5 text-xs text-royal-cream [color-scheme:dark] focus:border-royal-accent focus:outline-none";
+const chipCls = (active: boolean) =>
+  `rounded-full border px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] transition-colors ${
+    active
+      ? "border-royal-accent bg-royal-accent text-royal-bg"
+      : "border-royal-line text-royal-dim hover:border-royal-accent hover:text-royal-accent"
+  }`;
 
 const EXPENSE_CATEGORIES = [
   "supplies",
@@ -34,16 +51,155 @@ const EXPENSE_CATEGORIES = [
 ] as const;
 
 // ---------------------------------------------------------------------------
+// Date-range helpers (server-local days — the API parses YYYY-MM-DD the same)
+// ---------------------------------------------------------------------------
+
+function todayIso(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function shiftDays(iso: string, delta: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1, d + delta);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
+}
+
+function fmtDay(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-NG", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+type RangePreset = "all" | "today" | "yesterday" | "7d" | "30d" | "custom";
+
+const PRESET_LABEL: Record<RangePreset, string> = {
+  all: "All time",
+  today: "Today",
+  yesterday: "Yesterday",
+  "7d": "7 days",
+  "30d": "30 days",
+  custom: "Custom",
+};
+
+function presetToRange(
+  preset: RangePreset,
+  customFrom: string,
+  customTo: string,
+): { from?: string; to?: string } {
+  const t = todayIso();
+  switch (preset) {
+    case "all":
+      return {};
+    case "today":
+      return { from: t, to: t };
+    case "yesterday": {
+      const y = shiftDays(t, -1);
+      return { from: y, to: y };
+    }
+    case "7d":
+      return { from: shiftDays(t, -6), to: t };
+    case "30d":
+      return { from: shiftDays(t, -29), to: t };
+    case "custom":
+      return {
+        from: customFrom || undefined,
+        to: customTo || undefined,
+      };
+  }
+}
+
+function rangeLabel(preset: RangePreset, from?: string, to?: string): string {
+  if (preset === "custom") {
+    if (from && to) return from === to ? fmtDay(from) : `${fmtDay(from)} – ${fmtDay(to)}`;
+    if (from) return `From ${fmtDay(from)}`;
+    if (to) return `Until ${fmtDay(to)}`;
+    return "Custom range";
+  }
+  return PRESET_LABEL[preset];
+}
+
+function RangeChips({
+  preset,
+  onPreset,
+  customFrom,
+  customTo,
+  onCustomFrom,
+  onCustomTo,
+  allowAll = false,
+  testidBase,
+}: {
+  preset: RangePreset;
+  onPreset: (p: RangePreset) => void;
+  customFrom: string;
+  customTo: string;
+  onCustomFrom: (v: string) => void;
+  onCustomTo: (v: string) => void;
+  allowAll?: boolean;
+  testidBase: string;
+}) {
+  const presets: RangePreset[] = allowAll
+    ? ["all", "today", "yesterday", "7d", "30d", "custom"]
+    : ["today", "yesterday", "7d", "30d", "custom"];
+  return (
+    <div className="flex flex-wrap items-center gap-2" data-testid={`${testidBase}-range`}>
+      {presets.map((p) => (
+        <button
+          key={p}
+          type="button"
+          className={chipCls(preset === p)}
+          onClick={() => onPreset(p)}
+          data-testid={`${testidBase}-range-${p}`}
+        >
+          {PRESET_LABEL[p]}
+        </button>
+      ))}
+      {preset === "custom" && (
+        <span className="flex items-center gap-2">
+          <input
+            type="date"
+            className={dateCls}
+            value={customFrom}
+            onChange={(e) => onCustomFrom(e.target.value)}
+            data-testid={`${testidBase}-from`}
+          />
+          <span className="text-xs text-royal-dim">→</span>
+          <input
+            type="date"
+            className={dateCls}
+            value={customTo}
+            onChange={(e) => onCustomTo(e.target.value)}
+            data-testid={`${testidBase}-to`}
+          />
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Cash drawer
 // ---------------------------------------------------------------------------
 
 function CashDrawerSection({ canView, canManage }: { canView: boolean; canManage: boolean }) {
   const utils = trpc.useUtils();
-  const summary = trpc.money.drawer.summary.useQuery(undefined, {
+  const [preset, setPreset] = useState<RangePreset>("today");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const range = presetToRange(preset, customFrom, customTo);
+  const label = rangeLabel(preset, range.from, range.to);
+  const isToday = preset === "today";
+
+  const summary = trpc.money.drawer.summary.useQuery(range, {
     refetchInterval: 60_000,
   });
   const counts = trpc.money.drawer.counts.useQuery(
-    { limit: 10 },
+    { limit: 50, ...range },
     { enabled: canView },
   );
 
@@ -86,14 +242,42 @@ function CashDrawerSection({ canView, canManage }: { canView: boolean; canManage
     countMutation.mutate({ counted: amount, note: note || undefined });
   }
 
+  function handlePrint() {
+    if (!summary.data) return;
+    printDrawerSheet(summary.data, counts.data?.counts ?? [], label);
+  }
+
   const s = summary.data;
 
   return (
     <section className="border border-royal-line bg-royal-panel p-6">
-      <p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.3em] text-royal-accent">
-        <Scale className="h-4 w-4" strokeWidth={2} />
-        Cash drawer · today
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.3em] text-royal-accent">
+          <Scale className="h-4 w-4" strokeWidth={2} />
+          Cash drawer · {label}
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <RangeChips
+            preset={preset}
+            onPreset={setPreset}
+            customFrom={customFrom}
+            customTo={customTo}
+            onCustomFrom={setCustomFrom}
+            onCustomTo={setCustomTo}
+            testidBase="drawer"
+          />
+          <button
+            type="button"
+            onClick={handlePrint}
+            disabled={!s}
+            className="flex items-center gap-2 rounded-full border border-royal-line px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-royal-dim transition-colors hover:border-royal-accent hover:text-royal-accent disabled:opacity-50"
+            data-testid="drawer-print"
+          >
+            <Printer className="h-3.5 w-3.5" strokeWidth={2} />
+            Print
+          </button>
+        </div>
+      </div>
 
       {summary.isLoading ? (
         <div className="mt-4 flex items-center gap-2 text-sm text-royal-dim">
@@ -120,7 +304,9 @@ function CashDrawerSection({ canView, canManage }: { canView: boolean; canManage
             </p>
           </div>
           <div className="border border-royal-accent/50 px-4 py-3">
-            <p className={labelCls}>Expected in drawer</p>
+            <p className={labelCls}>
+              {isToday ? "Expected in drawer" : "Net cash movement"}
+            </p>
             <p className="mt-1 text-lg font-bold text-royal-accent" data-testid="drawer-expected">
               {formatNaira(s?.expectedKobo ?? 0)}
             </p>
@@ -128,7 +314,7 @@ function CashDrawerSection({ canView, canManage }: { canView: boolean; canManage
         </div>
       )}
 
-      {canManage && (
+      {canManage && isToday && (
       <form onSubmit={handleCount} className="mt-6 grid gap-6 border-t border-royal-line pt-6 sm:grid-cols-[1fr_2fr_auto] sm:items-end">
         <div>
           <label className={labelCls}>Counted cash (₦) *</label>
@@ -163,6 +349,12 @@ function CashDrawerSection({ canView, canManage }: { canView: boolean; canManage
         </button>
       </form>
       )}
+      {canManage && !isToday && (
+        <p className="mt-6 border-t border-royal-line pt-4 text-xs text-royal-dim">
+          Switch back to Today to count the drawer — a count always compares
+          against today's live takings.
+        </p>
+      )}
 
       {error && (
         <p className="mt-4 flex items-center gap-2 text-sm text-red-300">
@@ -191,13 +383,20 @@ function CashDrawerSection({ canView, canManage }: { canView: boolean; canManage
 
       {canView && (
         <div className="mt-6 border-t border-royal-line pt-6">
-          <p className={labelCls}>Recent counts</p>
+          <div className="flex items-center justify-between gap-4">
+            <p className={labelCls}>Counts · {label}</p>
+            {counts.data && counts.data.total > 0 && (
+              <p className="text-xs text-royal-dim" data-testid="counts-total">
+                {counts.data.total} count{counts.data.total === 1 ? "" : "s"}
+              </p>
+            )}
+          </div>
           {counts.isLoading ? (
             <div className="mt-3 flex items-center gap-2 text-sm text-royal-dim">
               <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} /> Loading…
             </div>
           ) : (counts.data?.counts ?? []).length === 0 ? (
-            <p className="mt-3 text-sm text-royal-dim">No drawer counts recorded yet.</p>
+            <p className="mt-3 text-sm text-royal-dim">No drawer counts recorded in this period.</p>
           ) : (
             <div className="mt-3 divide-y divide-royal-line border border-royal-line">
               {(counts.data?.counts ?? []).map((c) => (
@@ -242,9 +441,66 @@ function CashDrawerSection({ canView, canManage }: { canView: boolean; canManage
 // Expenses
 // ---------------------------------------------------------------------------
 
+const EXPENSE_PAGE_SIZE = 25;
+
 function ExpensesSection({ canManage }: { canManage: boolean }) {
   const utils = trpc.useUtils();
-  const list = trpc.money.expenses.list.useQuery({ limit: 100 });
+
+  // --- filters -------------------------------------------------------------
+  const [preset, setPreset] = useState<RangePreset>("all");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [search, setSearch] = useState("");
+  const [q, setQ] = useState("");
+  const [fCategory, setFCategory] = useState("");
+  const [fMethod, setFMethod] = useState("");
+  const [fStatus, setFStatus] = useState("");
+  const [page, setPage] = useState(1);
+
+  // Debounce the search box so we don't hit the DB on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setQ(search.trim()), 350);
+    return () => clearTimeout(t);
+  }, [search]);
+  // Any filter change starts again from page 1.
+  useEffect(() => {
+    setPage(1);
+  }, [q, fCategory, fMethod, fStatus, preset, customFrom, customTo]);
+
+  const range = presetToRange(preset, customFrom, customTo);
+  const queryInput = {
+    ...(q ? { q } : {}),
+    ...(fCategory ? { category: fCategory as (typeof EXPENSE_CATEGORIES)[number] } : {}),
+    ...(fMethod ? { method: fMethod as "cash" | "bank_pos" | "transfer" } : {}),
+    ...(fStatus ? { status: fStatus as "pending" | "approved" | "rejected" | "voided" } : {}),
+    ...range,
+    page,
+    pageSize: EXPENSE_PAGE_SIZE,
+  };
+  const list = trpc.money.expenses.list.useQuery(queryInput);
+
+  const filtersActive = Boolean(q || fCategory || fMethod || fStatus || range.from || range.to);
+
+  function clearFilters() {
+    setSearch("");
+    setQ("");
+    setFCategory("");
+    setFMethod("");
+    setFStatus("");
+    setPreset("all");
+    setCustomFrom("");
+    setCustomTo("");
+  }
+
+  function filterDescription(): string {
+    const parts: string[] = [];
+    if (q) parts.push(`matching "${q}"`);
+    if (fCategory) parts.push(fCategory);
+    if (fMethod) parts.push(fMethod.replace("_", " "));
+    if (fStatus) parts.push(`status: ${fStatus}`);
+    parts.push(rangeLabel(preset, range.from, range.to));
+    return parts.join(" · ");
+  }
 
   const [showForm, setShowForm] = useState(false);
   const [category, setCategory] = useState<string>("supplies");
@@ -324,7 +580,18 @@ function ExpensesSection({ canManage }: { canManage: boolean }) {
     });
   }
 
+  function handlePrint() {
+    if (!list.data) return;
+    printExpenses(list.data.expenses, {
+      filterLabel: filterDescription(),
+      approvedTotalKobo: list.data.approvedTotalKobo,
+      total: list.data.total,
+    });
+  }
+
   const expenses = list.data?.expenses ?? [];
+  const total = list.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / EXPENSE_PAGE_SIZE));
 
   return (
     <section className="border border-royal-line bg-royal-panel p-6">
@@ -333,17 +600,104 @@ function ExpensesSection({ canManage }: { canManage: boolean }) {
           <Receipt className="h-4 w-4" strokeWidth={2} />
           Expenses · all staff
         </p>
-        {canManage && (
-        <button
-          type="button"
-          onClick={() => setShowForm((v) => !v)}
-          className="flex shrink-0 items-center gap-2 rounded-full border border-royal-accent px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.2em] text-royal-accent transition-colors hover:bg-royal-accent hover:text-royal-bg"
-          data-testid="new-expense"
-        >
-          <Plus className="h-3.5 w-3.5" strokeWidth={2} />
-          New expense
-        </button>
-        )}
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={handlePrint}
+            disabled={!list.data || expenses.length === 0}
+            className="flex items-center gap-2 rounded-full border border-royal-line px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-royal-dim transition-colors hover:border-royal-accent hover:text-royal-accent disabled:opacity-50"
+            data-testid="expense-print"
+          >
+            <Printer className="h-3.5 w-3.5" strokeWidth={2} />
+            Print
+          </button>
+          {canManage && (
+          <button
+            type="button"
+            onClick={() => setShowForm((v) => !v)}
+            className="flex shrink-0 items-center gap-2 rounded-full border border-royal-accent px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.2em] text-royal-accent transition-colors hover:bg-royal-accent hover:text-royal-bg"
+            data-testid="new-expense"
+          >
+            <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+            New expense
+          </button>
+          )}
+        </div>
+      </div>
+
+      {/* --- filter toolbar --- */}
+      <div className="mt-5 space-y-3 border border-royal-line bg-royal-bg p-4" data-testid="expense-filters">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex min-w-56 flex-1 items-center gap-2 border-b border-royal-line px-1 py-1.5">
+            <Search className="h-3.5 w-3.5 shrink-0 text-royal-dim" strokeWidth={2} />
+            <input
+              className="w-full bg-transparent text-sm text-royal-cream placeholder:text-royal-dim/50 focus:outline-none"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search note or category…"
+              data-testid="expense-search"
+            />
+          </div>
+          <RangeChips
+            preset={preset}
+            onPreset={setPreset}
+            customFrom={customFrom}
+            customTo={customTo}
+            onCustomFrom={setCustomFrom}
+            onCustomTo={setCustomTo}
+            allowAll
+            testidBase="expense"
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <select
+            className="cursor-pointer border-b border-royal-line bg-transparent px-1 py-1.5 text-xs text-royal-cream [color-scheme:dark] focus:border-royal-accent focus:outline-none"
+            value={fCategory}
+            onChange={(e) => setFCategory(e.target.value)}
+            data-testid="expense-filter-category"
+          >
+            <option value="" className="bg-royal-bg">All categories</option>
+            {EXPENSE_CATEGORIES.map((c) => (
+              <option key={c} value={c} className="bg-royal-bg">
+                {c[0].toUpperCase() + c.slice(1)}
+              </option>
+            ))}
+          </select>
+          <select
+            className="cursor-pointer border-b border-royal-line bg-transparent px-1 py-1.5 text-xs text-royal-cream [color-scheme:dark] focus:border-royal-accent focus:outline-none"
+            value={fMethod}
+            onChange={(e) => setFMethod(e.target.value)}
+            data-testid="expense-filter-method"
+          >
+            <option value="" className="bg-royal-bg">All methods</option>
+            <option value="cash" className="bg-royal-bg">Cash (drawer)</option>
+            <option value="bank_pos" className="bg-royal-bg">Bank POS</option>
+            <option value="transfer" className="bg-royal-bg">Transfer</option>
+          </select>
+          <select
+            className="cursor-pointer border-b border-royal-line bg-transparent px-1 py-1.5 text-xs text-royal-cream [color-scheme:dark] focus:border-royal-accent focus:outline-none"
+            value={fStatus}
+            onChange={(e) => setFStatus(e.target.value)}
+            data-testid="expense-filter-status"
+          >
+            <option value="" className="bg-royal-bg">All statuses</option>
+            <option value="approved" className="bg-royal-bg">Approved</option>
+            <option value="pending" className="bg-royal-bg">Pending approval</option>
+            <option value="rejected" className="bg-royal-bg">Rejected</option>
+            <option value="voided" className="bg-royal-bg">Voided</option>
+          </select>
+          {filtersActive && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="flex items-center gap-1.5 rounded-full border border-royal-line px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-royal-dim transition-colors hover:border-royal-accent hover:text-royal-accent"
+              data-testid="expense-filter-clear"
+            >
+              <RotateCcw className="h-3 w-3" strokeWidth={2} />
+              Clear
+            </button>
+          )}
+        </div>
       </div>
 
       {notice && (
@@ -454,7 +808,9 @@ function ExpensesSection({ canManage }: { canManage: boolean }) {
         </div>
       ) : expenses.length === 0 ? (
         <p className="mt-4 text-sm text-royal-dim">
-          No expenses recorded yet. Cash expenses reduce the expected drawer balance.
+          {filtersActive
+            ? "No expenses match these filters — try clearing them."
+            : "No expenses recorded yet. Cash expenses reduce the expected drawer balance."}
         </p>
       ) : (
         <div className="mt-4 divide-y divide-royal-line border border-royal-line">
@@ -550,14 +906,47 @@ function ExpensesSection({ canManage }: { canManage: boolean }) {
           ))}
         </div>
       )}
+
+      {/* --- footer: totals + pagination --- */}
+      {!list.isLoading && expenses.length > 0 && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-royal-dim">
+          <p data-testid="expenses-total">
+            {total} expense{total === 1 ? "" : "s"}
+            {filtersActive ? " matching" : ""} · approved total{" "}
+            <span className="font-semibold text-royal-cream">
+              {formatNaira(list.data?.approvedTotalKobo ?? 0)}
+            </span>
+          </p>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="rounded-full border border-royal-line px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-royal-dim transition-colors hover:border-royal-accent hover:text-royal-accent disabled:opacity-40"
+                data-testid="expenses-prev"
+              >
+                Newer
+              </button>
+              <span data-testid="expenses-page">
+                Page {page} of {totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                className="rounded-full border border-royal-line px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-royal-dim transition-colors hover:border-royal-accent hover:text-royal-accent disabled:opacity-40"
+                data-testid="expenses-next"
+              >
+                Older
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Expense approvals (approvers only — expenseApprovals: manage)
-// ---------------------------------------------------------------------------
-
 function ExpenseApprovalsSection() {
   const utils = trpc.useUtils();
   const queue = trpc.money.expenses.pendingQueue.useQuery();
@@ -740,7 +1129,17 @@ function TerminalsSection({ canManage }: { canManage: boolean }) {
   const utils = trpc.useUtils();
 
   const list = trpc.terminals.list.useQuery();
-  const stats = trpc.terminals.todayStats.useQuery();
+
+  // Date range for the takings cards (default: today, like the bank's own
+  // end-of-day report — but staff can now ask "what should have landed on the
+  // machine between these two dates?").
+  const [preset, setPreset] = useState<RangePreset>("today");
+  const [customFrom, setCustomFrom] = useState(todayIso());
+  const [customTo, setCustomTo] = useState(todayIso());
+  const range = presetToRange(preset, customFrom, customTo);
+  const stats = trpc.terminals.todayStats.useQuery(range, {
+    refetchInterval: 60_000,
+  });
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -825,7 +1224,7 @@ function TerminalsSection({ canManage }: { canManage: boolean }) {
   }
 
   const terminals = list.data ?? [];
-  const todayTotalKobo =
+  const rangeTotalKobo =
     (stats.data?.terminals ?? []).reduce((sum, t) => sum + t.totalKobo, 0) +
     (stats.data?.unassigned.totalKobo ?? 0);
 
@@ -936,16 +1335,45 @@ function TerminalsSection({ canManage }: { canManage: boolean }) {
         </form>
       )}
 
-      {/* Today by terminal */}
+      {/* Card takings by terminal over the selected range */}
       <section className="border border-royal-line bg-royal-panel p-6">
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.3em] text-royal-accent">
             <Banknote className="h-4 w-4" strokeWidth={2} />
-            Today's card takings by terminal
+            Card takings by terminal · {rangeLabel(preset, customFrom, customTo)}
           </p>
-          <p className="text-sm font-semibold text-royal-cream">
-            {formatNaira(todayTotalKobo)}
-          </p>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              data-testid="terminals-print"
+              disabled={stats.isLoading}
+              onClick={() =>
+                printTerminalTakings(
+                  stats.data?.terminals ?? [],
+                  stats.data?.unassigned ?? { payments: 0, totalKobo: 0 },
+                  rangeLabel(preset, customFrom, customTo),
+                )
+              }
+              className="flex items-center gap-2 rounded-full border border-royal-line px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-royal-dim transition-colors hover:border-royal-accent hover:text-royal-accent disabled:opacity-50"
+            >
+              <Printer className="h-3.5 w-3.5" strokeWidth={2} />
+              Print
+            </button>
+            <p className="text-sm font-semibold text-royal-cream" data-testid="terminals-total">
+              {formatNaira(rangeTotalKobo)}
+            </p>
+          </div>
+        </div>
+        <div className="mt-4">
+          <RangeChips
+            preset={preset}
+            onPreset={setPreset}
+            customFrom={customFrom}
+            customTo={customTo}
+            onCustomFrom={setCustomFrom}
+            onCustomTo={setCustomTo}
+            testidBase="term"
+          />
         </div>
         {stats.isLoading ? (
           <div className="mt-4 flex items-center gap-2 text-sm text-royal-dim">
@@ -957,7 +1385,7 @@ function TerminalsSection({ canManage }: { canManage: boolean }) {
               <div
                 key={t.id}
                 className="border border-royal-line px-4 py-3"
-                data-testid={`today-terminal-${t.id}`}
+                data-testid={`term-stat-${t.id}`}
               >
                 <p className="truncate text-sm font-semibold text-royal-cream">
                   {t.name}
@@ -971,7 +1399,7 @@ function TerminalsSection({ canManage }: { canManage: boolean }) {
                   {formatNaira(t.totalKobo)}
                 </p>
                 <p className="text-[11px] text-royal-dim">
-                  {t.payments} payment{t.payments === 1 ? "" : "s"} today
+                  {t.payments} payment{t.payments === 1 ? "" : "s"} in range
                 </p>
               </div>
             ))}
@@ -1088,8 +1516,54 @@ function TerminalsSection({ canManage }: { canManage: boolean }) {
 // Page
 // ---------------------------------------------------------------------------
 
+
+type MoneyTab = "drawer" | "expenses" | "approvals" | "terminals";
+
+const TAB_DEFS: {
+  key: MoneyTab;
+  label: string;
+  icon: typeof Scale;
+}[] = [
+  { key: "drawer", label: "Cash drawer", icon: Scale },
+  { key: "expenses", label: "Expenses", icon: Receipt },
+  { key: "approvals", label: "Approvals", icon: ShieldCheck },
+  { key: "terminals", label: "POS terminals", icon: CreditCard },
+];
+
 export default function MoneyPage() {
   const { has } = usePerms();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const canDrawer = has("drawer", "view");
+  const canExpenses = has("expenses", "view");
+  const canApprovals = has("expenseApprovals", "manage");
+  const canTerminals = has("terminals", "view");
+
+  const allowed: Record<MoneyTab, boolean> = {
+    drawer: canDrawer,
+    expenses: canExpenses,
+    approvals: canApprovals,
+    terminals: canTerminals,
+  };
+  const visibleTabs = TAB_DEFS.filter((t) => allowed[t.key]);
+
+  const rawTab = searchParams.get("tab") as MoneyTab | null;
+  const activeTab: MoneyTab =
+    rawTab && allowed[rawTab] ? rawTab : (visibleTabs[0]?.key ?? "drawer");
+
+  function selectTab(key: MoneyTab) {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", key);
+    setSearchParams(next, { replace: true });
+  }
+
+  // Pending-approval badge on the Approvals tab so managers spot the queue
+  // from any tab.
+  const pendingQueue = trpc.money.expenses.pendingQueue.useQuery(undefined, {
+    enabled: canApprovals,
+    refetchInterval: 30_000,
+  });
+  const pendingCount = canApprovals ? (pendingQueue.data?.pending.length ?? 0) : 0;
 
   return (
     <div className="space-y-8">
@@ -1098,17 +1572,62 @@ export default function MoneyPage() {
           Money
         </p>
         <p className="mt-2 max-w-lg text-sm leading-6 text-royal-dim">
-          Count the cash drawer against today's takings and record shop
-          expenses. Cash expenses reduce what should be in the drawer.
+          Count the cash drawer against takings, record shop expenses, and
+          reconcile each card machine. Cash expenses reduce what should be in
+          the drawer.
         </p>
       </div>
 
-      {has("drawer", "view") && (
-        <CashDrawerSection canView={has("drawer", "view")} canManage={has("drawer", "manage")} />
+      {visibleTabs.length > 1 && (
+        <div
+          className="flex flex-wrap gap-x-6 gap-y-2 border-b border-royal-line"
+          role="tablist"
+          data-testid="money-tabs"
+        >
+          {visibleTabs.map(({ key, label, icon: Icon }) => {
+            const active = key === activeTab;
+            return (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                data-testid={`money-tab-${key}`}
+                onClick={() => selectTab(key)}
+                className={`-mb-px flex items-center gap-2 border-b-2 px-1 pb-3 text-[11px] font-semibold uppercase tracking-[0.2em] transition-colors ${
+                  active
+                    ? "border-royal-accent text-royal-accent"
+                    : "border-transparent text-royal-dim hover:border-royal-accent/40 hover:text-royal-cream"
+                }`}
+              >
+                <Icon className="h-4 w-4" strokeWidth={2} />
+                {label}
+                {key === "approvals" && pendingCount > 0 && (
+                  <span
+                    className="rounded-full bg-royal-accent px-2 py-0.5 text-[9px] font-bold text-royal-bg"
+                    data-testid="money-tab-approvals-badge"
+                  >
+                    {pendingCount}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
       )}
-      {has("expenseApprovals", "manage") && <ExpenseApprovalsSection />}
-      {has("expenses", "view") && <ExpensesSection canManage={has("expenses", "manage")} />}
-      {has("terminals", "view") && <TerminalsSection canManage={has("terminals", "manage")} />}
+
+      <div role="tabpanel" data-testid={`money-panel-${activeTab}`}>
+        {activeTab === "drawer" && canDrawer && (
+          <CashDrawerSection canView={canDrawer} canManage={has("drawer", "manage")} />
+        )}
+        {activeTab === "expenses" && canExpenses && (
+          <ExpensesSection canManage={has("expenses", "manage")} />
+        )}
+        {activeTab === "approvals" && canApprovals && <ExpenseApprovalsSection />}
+        {activeTab === "terminals" && canTerminals && (
+          <TerminalsSection canManage={has("terminals", "manage")} />
+        )}
+      </div>
     </div>
   );
 }

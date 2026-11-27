@@ -211,7 +211,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         kind: "approval",
         title: "Expense waiting for approval",
         body: `${a.note} · ${formatNaira(a.amountKobo)}${a.staffName ? ` — ${a.staffName}` : ""}`,
-        href: "/money",
+        href: "/money?tab=approvals",
         createdAt: Date.now(),
       });
       playApprovalBlip();
