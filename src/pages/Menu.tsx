@@ -134,17 +134,17 @@ function CategoryRow({
   }
 
   return (
-    <div className="group relative">
+    <div className="group relative max-lg:shrink-0">
       <button
         type="button"
         onClick={onSelect}
-        className={`flex w-full items-center gap-2 border-l-2 px-3 py-2.5 text-left text-sm transition-colors ${
+        className={`flex w-full items-center gap-2 border-l-2 px-3 py-2.5 text-left text-sm transition-colors max-lg:w-auto max-lg:border-b-2 max-lg:border-l-0 ${
           selected
             ? "border-royal-accent bg-royal-faint/40 text-royal-cream"
             : "border-transparent text-royal-dim hover:bg-royal-faint/20 hover:text-royal-cream"
         } ${category.active ? "" : "opacity-50"}`}
       >
-        <span className="flex-1 truncate">{category.name}</span>
+        <span className="flex-1 truncate max-lg:whitespace-nowrap">{category.name}</span>
         <span className="text-[10px] text-royal-dim/60">
           {category.items.length}
         </span>
@@ -318,7 +318,7 @@ export default function MenuPage() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-royal-accent">
             Menu management
@@ -369,7 +369,7 @@ export default function MenuPage() {
       {tab === "modifiers" && <ModifierLibraryTab canManage={canManage} />}
 
       {tab === "items" && (
-        <div className="grid gap-8 lg:grid-cols-[220px_1fr]">
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-[220px_minmax(0,1fr)]">
           {/* Category rail */}
           <div className="border border-royal-line">
             <div className="flex items-center justify-between border-b border-royal-line px-3 py-3">
@@ -390,17 +390,18 @@ export default function MenuPage() {
             {addingCategory && canManage && (
               <AddCategoryForm onDone={() => setAddingCategory(false)} />
             )}
+            <div className="royal-scroll max-lg:flex max-lg:overflow-x-auto">
             <button
               type="button"
               onClick={() => setSelectedCat("all")}
-              className={`flex w-full items-center border-l-2 px-3 py-2.5 text-left text-sm transition-colors ${
+              className={`flex w-full items-center border-l-2 px-3 py-2.5 text-left text-sm transition-colors max-lg:w-auto max-lg:shrink-0 max-lg:border-b-2 max-lg:border-l-0 ${
                 selectedCat === "all"
                   ? "border-royal-accent bg-royal-faint/40 text-royal-cream"
                   : "border-transparent text-royal-dim hover:bg-royal-faint/20 hover:text-royal-cream"
               }`}
             >
-              <span className="flex-1">All items</span>
-              <span className="text-[10px] text-royal-dim/60">{totalItems}</span>
+              <span className="flex-1 max-lg:whitespace-nowrap">All items</span>
+              <span className="text-[10px] text-royal-dim/60 max-lg:ml-2">{totalItems}</span>
             </button>
             {categories.map((c) => (
               <CategoryRow
@@ -411,10 +412,11 @@ export default function MenuPage() {
                 onSelect={() => setSelectedCat(c.id)}
               />
             ))}
+            </div>
           </div>
 
           {/* Items */}
-          <div className="space-y-6">
+          <div className="min-w-0 space-y-6">
             {menu.isLoading && (
               <div className="flex justify-center py-16">
                 <Loader2 className="h-6 w-6 animate-spin text-royal-accent" strokeWidth={1.5} />
@@ -430,7 +432,7 @@ export default function MenuPage() {
             {menu.data && visibleCategories.length === 0 && (
               <div className="border border-dashed border-royal-line px-6 py-14 text-center">
                 <p className="text-sm text-royal-dim">
-                  No categories yet — add one from the left rail.
+                  No categories yet — add one from the category panel.
                 </p>
               </div>
             )}

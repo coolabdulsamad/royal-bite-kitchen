@@ -280,7 +280,7 @@ export default function StaffPage() {
   return (
     <div className="space-y-8">
       {/* Header row */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-royal-accent">
             Staff accounts

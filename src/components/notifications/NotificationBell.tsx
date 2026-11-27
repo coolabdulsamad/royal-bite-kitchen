@@ -107,7 +107,7 @@ export function NotificationBell() {
         title="Notifications"
         onClick={onClick}
         data-testid="notif-bell"
-        className="relative p-2 text-royal-dim transition-colors hover:text-royal-cream"
+        className="relative p-1.5 text-royal-dim transition-colors hover:text-royal-cream sm:p-2"
       >
         <Bell className="h-4 w-4" strokeWidth={1.75} />
         {badge > 0 && (

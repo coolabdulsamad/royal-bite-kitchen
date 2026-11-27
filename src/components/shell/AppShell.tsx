@@ -107,7 +107,7 @@ function SidebarFooter({
     >
       {!collapsed && (
         <p className="text-[10px] tracking-wide text-royal-dim/60">
-          v32 · Royal Bite Kitchen POS
+          v34 · Royal Bite Kitchen POS
         </p>
       )}
       {onToggle && (
@@ -136,7 +136,7 @@ function UserChip() {
   if (!user) return null;
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-1.5 sm:gap-3">
       <NavLink to="/account" className="group flex items-center gap-2.5">
         <span className="flex h-8 w-8 items-center justify-center rounded-full border border-royal-line text-[11px] font-semibold text-royal-accent">
           {user.name
@@ -163,7 +163,7 @@ function UserChip() {
           logout();
           navigate("/login", { replace: true });
         }}
-        className="p-2 text-royal-dim transition-colors hover:text-royal-accent"
+        className="p-1.5 text-royal-dim transition-colors hover:text-royal-accent sm:p-2"
       >
         <LogOut className="h-4 w-4" strokeWidth={1.75} />
       </button>
@@ -247,20 +247,20 @@ export function AppShell() {
           collapsed ? "lg:pl-20" : "lg:pl-64"
         }`}
       >
-        <header className="sticky top-0 z-40 flex h-16 items-center gap-3 border-b border-royal-line bg-royal-bg/85 px-4 backdrop-blur-md sm:px-6">
+        <header className="sticky top-0 z-40 flex h-16 items-center gap-2 border-b border-royal-line bg-royal-bg/85 px-3 backdrop-blur-md sm:gap-3 sm:px-6">
           <button
             type="button"
             onClick={() => setDrawerOpen(true)}
-            className="p-2 text-royal-dim transition-colors hover:text-royal-cream lg:hidden"
+            className="-ml-1 p-2 text-royal-dim transition-colors hover:text-royal-cream lg:hidden"
             aria-label="Open menu"
           >
             <Menu className="h-5 w-5" />
           </button>
-          <h1 className="font-display text-xl text-royal-cream">
+          <h1 className="min-w-0 flex-1 truncate font-display text-lg text-royal-cream sm:text-xl">
             {current?.title ?? "Royal Bite Kitchen"}
           </h1>
 
-          <div className="ml-auto flex items-center gap-4">
+          <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-3 md:gap-4">
             <SyncMenu />
             <PrinterMenu />
             <NotificationBell />

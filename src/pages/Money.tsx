@@ -594,8 +594,8 @@ function ExpensesSection({ canManage }: { canManage: boolean }) {
   const totalPages = Math.max(1, Math.ceil(total / EXPENSE_PAGE_SIZE));
 
   return (
-    <section className="border border-royal-line bg-royal-panel p-6">
-      <div className="flex items-start justify-between gap-4">
+    <section className="border border-royal-line bg-royal-panel p-4 sm:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.3em] text-royal-accent">
           <Receipt className="h-4 w-4" strokeWidth={2} />
           Expenses · all staff

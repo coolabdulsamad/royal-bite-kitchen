@@ -176,7 +176,7 @@ export default function PermissionsPage() {
                 <tr key={domain.key} className="transition-colors hover:bg-royal-faint/20">
                   <td className="sticky left-0 z-10 bg-royal-bg px-4 py-3">
                     <p className="text-sm font-semibold text-royal-cream">{domain.label}</p>
-                    <p className="mt-0.5 max-w-[260px] text-xs leading-4 text-royal-dim/80">
+                    <p className="mt-0.5 max-w-[150px] text-xs leading-4 text-royal-dim/80 sm:max-w-[260px]">
                       {domain.description}
                       {!rowEditable && (
                         <span className="ml-1 inline-flex items-center gap-1 text-royal-dim/60">

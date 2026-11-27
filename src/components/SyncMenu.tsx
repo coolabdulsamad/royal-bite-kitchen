@@ -95,7 +95,7 @@ export function SyncMenu() {
         data-testid="sync-pill"
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          "flex h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-colors",
+          "flex h-9 items-center gap-1.5 rounded-full border px-2 text-xs font-semibold transition-colors sm:px-3",
           pill.cls,
         )}
         title={online ? "Connected" : "Offline — sales are saved on this device"}

@@ -81,7 +81,7 @@ export function PrinterMenu() {
         onClick={() => setOpen((o) => !o)}
         title={`Printer — ${modeLabel}`}
         aria-label="Printer settings"
-        className={`relative p-2 transition-colors hover:text-royal-accent ${
+        className={`relative p-1.5 transition-colors hover:text-royal-accent sm:p-2 ${
           printer.direct ? "text-royal-accent" : "text-royal-dim"
         }`}
       >
