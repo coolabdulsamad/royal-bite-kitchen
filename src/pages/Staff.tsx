@@ -37,6 +37,9 @@ interface ProfileForm {
   nextOfKinPhone: string;
   bankName: string;
   bankAccountNumber: string;
+  /** Monthly salary in NAIRA as typed ("" = not set). */
+  salary: string;
+  salaryNote: string;
 }
 
 const EMPTY_PROFILE: ProfileForm = {
@@ -54,6 +57,8 @@ const EMPTY_PROFILE: ProfileForm = {
   nextOfKinPhone: "",
   bankName: "",
   bankAccountNumber: "",
+  salary: "",
+  salaryNote: "",
 };
 
 type StaffRow = {
@@ -77,6 +82,8 @@ type StaffRow = {
   nextOfKinPhone: string | null;
   bankName: string | null;
   bankAccountNumber: string | null;
+  salaryKobo: number | null;
+  salaryNote: string | null;
 };
 
 function profileFromRow(s: StaffRow): ProfileForm {
@@ -95,6 +102,8 @@ function profileFromRow(s: StaffRow): ProfileForm {
     nextOfKinPhone: s.nextOfKinPhone ?? "",
     bankName: s.bankName ?? "",
     bankAccountNumber: s.bankAccountNumber ?? "",
+    salary: s.salaryKobo != null ? String(s.salaryKobo / 100) : "",
+    salaryNote: s.salaryNote ?? "",
   };
 }
 
@@ -116,6 +125,8 @@ function profileForCreate(p: ProfileForm) {
     nextOfKinPhone: orUndef(p.nextOfKinPhone),
     bankName: orUndef(p.bankName),
     bankAccountNumber: orUndef(p.bankAccountNumber),
+    salaryKobo: p.salary.trim() === "" ? undefined : Number(p.salary),
+    salaryNote: orUndef(p.salaryNote),
   };
 }
 
@@ -137,6 +148,8 @@ function profileForUpdate(p: ProfileForm) {
     nextOfKinPhone: orNull(p.nextOfKinPhone),
     bankName: orNull(p.bankName),
     bankAccountNumber: orNull(p.bankAccountNumber),
+    salaryKobo: p.salary.trim() === "" ? null : Number(p.salary),
+    salaryNote: orNull(p.salaryNote),
   };
 }
 
@@ -196,6 +209,15 @@ function ProfileFields({
       {text("employmentDate", "Employment date", { type: "date" })}
       {text("bankName", "Bank name", { maxLength: 80 })}
       {text("bankAccountNumber", "Bank account number", { maxLength: 20 })}
+      <div className="sm:col-span-2">
+        <p className="mb-4 mt-2 border-t border-royal-line/60 pt-4 text-[10px] font-semibold uppercase tracking-[0.3em] text-royal-dim/70">
+          Salary structure
+        </p>
+        <div className="grid gap-x-8 gap-y-6 sm:grid-cols-2">
+          {text("salary", "Monthly salary (₦)", { type: "number", placeholder: "e.g. 80000" })}
+          {text("salaryNote", "Salary note", { placeholder: "e.g. includes transport allowance", maxLength: 255 })}
+        </div>
+      </div>
       <div className="sm:col-span-2">
         <p className="mb-4 mt-2 border-t border-royal-line/60 pt-4 text-[10px] font-semibold uppercase tracking-[0.3em] text-royal-dim/70">
           Guarantor & next of kin

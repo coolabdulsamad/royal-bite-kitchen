@@ -35,6 +35,7 @@ const KIND_LABEL: Record<string, string> = {
   money_out: "Money out",
   adjustment: "Adjustment",
   credit_repayment: "Debt repayment",
+  payroll: "Salary payment",
 };
 
 export interface PrintableAccount {
