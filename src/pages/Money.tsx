@@ -455,7 +455,9 @@ function ExpensesSection({ canManage }: { canManage: boolean }) {
   const [fCategory, setFCategory] = useState("");
   const [fMethod, setFMethod] = useState("");
   const [fStatus, setFStatus] = useState("");
+  const [fStaff, setFStaff] = useState("");
   const [page, setPage] = useState(1);
+  const staffNames = trpc.staff.names.useQuery();
 
   // Debounce the search box so we don't hit the DB on every keystroke.
   useEffect(() => {
@@ -465,7 +467,7 @@ function ExpensesSection({ canManage }: { canManage: boolean }) {
   // Any filter change starts again from page 1.
   useEffect(() => {
     setPage(1);
-  }, [q, fCategory, fMethod, fStatus, preset, customFrom, customTo]);
+  }, [q, fCategory, fMethod, fStatus, fStaff, preset, customFrom, customTo]);
 
   const range = presetToRange(preset, customFrom, customTo);
   const queryInput = {
@@ -473,13 +475,14 @@ function ExpensesSection({ canManage }: { canManage: boolean }) {
     ...(fCategory ? { category: fCategory as (typeof EXPENSE_CATEGORIES)[number] } : {}),
     ...(fMethod ? { method: fMethod as "cash" | "bank_pos" | "transfer" } : {}),
     ...(fStatus ? { status: fStatus as "pending" | "approved" | "rejected" | "voided" } : {}),
+    ...(fStaff ? { staffId: Number(fStaff) } : {}),
     ...range,
     page,
     pageSize: EXPENSE_PAGE_SIZE,
   };
   const list = trpc.money.expenses.list.useQuery(queryInput);
 
-  const filtersActive = Boolean(q || fCategory || fMethod || fStatus || range.from || range.to);
+  const filtersActive = Boolean(q || fCategory || fMethod || fStatus || fStaff || range.from || range.to);
 
   function clearFilters() {
     setSearch("");
@@ -487,6 +490,7 @@ function ExpensesSection({ canManage }: { canManage: boolean }) {
     setFCategory("");
     setFMethod("");
     setFStatus("");
+    setFStaff("");
     setPreset("all");
     setCustomFrom("");
     setCustomTo("");
@@ -498,6 +502,7 @@ function ExpensesSection({ canManage }: { canManage: boolean }) {
     if (fCategory) parts.push(fCategory);
     if (fMethod) parts.push(fMethod.replace("_", " "));
     if (fStatus) parts.push(`status: ${fStatus}`);
+    if (fStaff) parts.push(`by ${staffNames.data?.find((x) => x.id === Number(fStaff))?.name ?? "staff"}`);
     parts.push(rangeLabel(preset, range.from, range.to));
     return parts.join(" · ");
   }
@@ -685,6 +690,18 @@ function ExpensesSection({ canManage }: { canManage: boolean }) {
             <option value="pending" className="bg-royal-bg">Pending approval</option>
             <option value="rejected" className="bg-royal-bg">Rejected</option>
             <option value="voided" className="bg-royal-bg">Voided</option>
+          </select>
+          <select
+            className="cursor-pointer border-b border-royal-line bg-transparent px-1 py-1.5 text-xs text-royal-cream [color-scheme:dark] focus:border-royal-accent focus:outline-none"
+            value={fStaff}
+            onChange={(e) => setFStaff(e.target.value)}
+            data-testid="expense-filter-staff"
+            title="Filter by the staff member who recorded the expense"
+          >
+            <option value="" className="bg-royal-bg">All staff</option>
+            {(staffNames.data ?? []).map((st) => (
+              <option key={st.id} value={st.id} className="bg-royal-bg">{st.name}</option>
+            ))}
           </select>
           {filtersActive && (
             <button

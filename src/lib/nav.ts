@@ -15,6 +15,7 @@ import {
   ScrollText,
   HandCoins,
   ShieldCheck,
+  Landmark,
 } from "lucide-react";
 import type { DomainKey, PermLevel } from "@contracts/permissions";
 import { hasAnyPerm, hasPerm, type PermCheck } from "@/lib/perms";
@@ -62,6 +63,7 @@ export const NAV_GROUPS: NavGroup[] = [
           ["terminals", "view"],
         ],
       },
+      { title: "Bank & Cash", path: "/accounts", icon: Landmark, phase: "Live", perm: ["accounts", "view"] },
       { title: "Settlements", path: "/settlements", icon: HandCoins, phase: "Live", perm: ["settlements", "view"] },
       { title: "Staff", path: "/staff", icon: UserCog, phase: "Live", perm: ["staff", "view"] },
       { title: "Reports", path: "/reports", icon: BarChart3, phase: "Live", perm: ["reports", "view"] },

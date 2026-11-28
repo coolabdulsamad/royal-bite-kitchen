@@ -13,6 +13,7 @@ import DisplayPage from "@/pages/Display";
 import SalesPage from "@/pages/Sales";
 import OrdersPage from "@/pages/Orders";
 import MoneyPage from "@/pages/Money";
+import AccountsPage from "@/pages/Accounts";
 import ActivityPage from "@/pages/Activity";
 import CustomersPage from "@/pages/Customers";
 import StockPage from "@/pages/Stock";
@@ -57,6 +58,7 @@ export default function App() {
         <Route path="/account" element={<AccountPage />} />
         <Route path="/menu" element={gated("/menu", <MenuPage />)} />
         <Route path="/money" element={gated("/money", <MoneyPage />)} />
+        <Route path="/accounts" element={gated("/accounts", <AccountsPage />)} />
         <Route path="/activity" element={gated("/activity", <ActivityPage />)} />
         <Route path="/reports" element={gated("/reports", <ReportsPage />)} />
         <Route path="/settlements" element={gated("/settlements", <SettlementsPage />)} />
